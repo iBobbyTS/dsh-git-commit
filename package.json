@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-commit",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Floating Git stats and AI commits with native DSH LLM, authenticated RPC, settings and shared service",
   "license": "MIT",
@@ -20,7 +20,11 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime"
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
       ],
       "immediately": true
     }

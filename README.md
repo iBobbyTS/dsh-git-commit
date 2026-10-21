@@ -2,7 +2,7 @@
 
 An independent **DeepSeek Harness (DSH)** plugin providing a three-row floating Git status panel, one-click AI-generated commits, repository-specific writing instructions, a native right-sidebar settings tab, and a reusable **Host service** for other plugins.
 
-> **Validation status:** Git mutation and service logic are tested against real temporary Git repositories. The browser module and DSH profile manifest have been statically checked, but **full Web/Desktop DSH startup and live model calls have not been tested in an installed DSH profile**. The implementation intentionally does not claim end-to-end compatibility without that validation.
+> **Validation status:** Git mutation and service logic are tested with real temporary Git repositories. A browser-loader/component smoke test checks that the floating panel renders for the mounted Session, and the manifest dependencies are checked against DSH's published client packages. **An installed Desktop end-to-end run and a live model call still require user-side verification**.
 
 ## UI
 
@@ -16,7 +16,7 @@ The floating panel uses the DSH `shell.overlay` slot and appears above the conve
 └─────────────────────┘
 ```
 
-* **Row 1:** branch name for the current Session's working tree (with detached-HEAD support).
+* **Row 1:** branch name for the currently visible Conversation Session (tracked through the public `ctx.sidebarRight.mounted` observable; with detached-HEAD support).
 * **Row 2:** added/deleted lines relative to HEAD. Tracks staged and unstaged tracked files, plus readable untracked text files. Untracked binary files and files over 4 MiB are excluded from numeric line counts; they remain eligible for commit.
 * **Row 3:** `Commit` and `Settings` buttons. Commit runs immediately, displaying an outcome beneath the three rows. The button is disabled if nothing is detected to commit.
 * `Settings` opens the native DSH **right sidebar** through `ctx.sidebarRight.openTab('gitCommitSettings')` — not a custom web modal.
@@ -99,6 +99,24 @@ without removing built-in bundles. The bundle applies [cordis.patch.yml](cordis.
 registering the Host plugin and loading `./client` through the Web client module
 loader. Restart the affected DSH Host/profile.
 
+### Diagnosing a missing floating panel
+
+The floating panel renders only when **a Conversation Session is actually visible**;
+Plugin Manager and other global pages hide it. In Desktop press **Command+Option+I**
+(or F12 / Fn+F12) to open DevTools and inspect:
+
+```js
+window.__DSH_BOOT__?.entries?.find(row => row.id === 'dsh-git-commit')
+document.querySelector('style[data-dsh-git-commit="true"]')
+document.querySelector('[data-shell-overlay] .dgc-root')
+```
+
+- Missing manifest entry: check that the installed bundle is enabled in the **Desktop** profile.
+- Manifest entry, but no `style` element: the Client module did not activate (check Console).
+- Style exists, but no `.dgc-root`: confirm that a Conversation Session is on screen;
+  a component crash or missing Session identity will also appear in DevTools.
+- `.dgc-root` exists, but cannot be seen: inspect CSS/layout in the Elements panel.
+
 The Host injects only `connection` and `llm`. The authenticated `/api`
 transport is owned by DSH Connection, and the plugin registers an exact route
 through `connection.fetch.register()`. It does not require or access the
@@ -108,16 +126,20 @@ The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6
 
 > **Security:** UI requests use **`ctx.connection.fetch.register({ path: '/api/git-commit', ... })`**, reusing the authenticated DSH `/api` carrier and its Owner/Host/Origin checks. The browser uses the standard `ctx.connection.rpc.call('/api', 'git-commit', ...)` request envelope. Importantly, this avoids `ctx.connection.rpc.handle()` creating a new channel, which reads `webServer` from the Connection service's *own* injection scope and caused plugin activation to fail. A bare `ctx.webServer.register()` would bypass authentication and is not used.
 
-### Updating a failed 0.1.0 / 0.1.1 Desktop installation
+### Updating an existing Desktop installation
 
 Use Plugins → **Uninstall** (not only the enable toggle) and install the Git URL again.
 DSH's package manager can retain the previous Git checkout when it already
 matches the installed spec; explicitly remove the installed package first.
-Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.2**.
+Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.3**.
 
-The previous `webServer` inject addition in 0.1.1 was insufficient because
-`connection.rpc.handle()` uses a shadow Context originating in the Connection
-provider, not the consumer's declared dependencies. v0.1.2 avoids that route.
+Earlier versions had two separate startup/UI issues: v0.1.1 registered RPC
+through the Connection provider's shadow context and incorrectly accessed
+`webServer` (v0.1.2 fixed this); v0.1.2 also used the nonexistent
+`SessionListState.current` selector, hiding its floating panel (fixed in v0.1.3).
+The Client bundle now declares dependencies on real DSH packages providing
+Connection, rendering, layout, Session data, and the right Sidebar instead of
+the obsolete `@deepseek-ai/dsh-client-runtime` package.
 
 ## Calling the commit API from another DSH Host plugin
 
@@ -161,7 +183,7 @@ npm test
 npm run check
 ```
 
-Tests use temporary *real Git repositories* for staged-only vs all-files commits, untracked files, worktree changes during generation, accurate return values, settings persistence, reasoning metadata, and oversized diff batching. No provider key is required. A final installed-profile smoke test is still needed for the client module loader, DSH right-sidebar slot, and live LLM adapter wiring.
+Tests use temporary *real Git repositories* for staged-only vs all-files commits, untracked files, worktree changes during generation, accurate return values, settings persistence, reasoning metadata, and oversized diff batching. The Client test executes the published `window.__ModuleLoader__` factory in a simulated browser with observable on-screen Session selection. It verifies the floating panel, settings button, and sidebar registration, plus the supported-client-package manifest. No provider key is required. An actual Desktop host/browser integration test and a live LLM call are still needed.
 
 ## Reference implementations and licensing
 
