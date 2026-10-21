@@ -12,16 +12,22 @@ The floating panel uses the DSH `shell.overlay` slot and appears above the conve
 ┌─────────────────────┐
 │ ⠿  feature/my-work   │
 │ +248        −73      │
-│ [ Commit ] [Settings]│
+│ [   ◉   ] [   ⚙   ] │
 └─────────────────────┘
 ```
 
 * **Row 1:** branch name for the currently visible Conversation Session (tracked through the public `ctx.sidebarRight.mounted` observable; with detached-HEAD support).
 * **Row 2:** added/deleted lines relative to HEAD. Tracks staged and unstaged tracked files, plus readable untracked text files. Untracked binary files and files over 4 MiB are excluded from numeric line counts; they remain eligible for commit.
-* **Row 3:** `Commit` and `Settings` buttons. Commit runs immediately, displaying an outcome beneath the three rows. The button is disabled if nothing is detected to commit.
+* **Row 3:** two icon-only controls: Git commit symbol for `Commit`, gear for `Settings`. Both retain accessible labels and tooltips. Commit runs immediately, displaying the outcome beneath the three rows, and is disabled when nothing can be committed.
 * `Settings` opens the native DSH **right sidebar** through `ctx.sidebarRight.openTab('gitCommitSettings')` — not a custom web modal.
 
 Git status updates are event-driven on the Host (`fs.watch` for worktree and Git metadata, with 160 ms debounce and a one-second starvation cap). The browser polls only a *cheap numeric change token* every 900 ms and runs the Git status command only when the token changes. A 30-second full-refresh fallback accounts for lost OS events. External editors, shell commands, Agent Edit/Write tools and other processes are observed when they modify the same local filesystem.
+
+The light palette is unchanged. In dark mode, the floating card uses a graphite/blue-gray
+surface with a subtle border and shadow, a near-black primary commit button,
+and a muted charcoal secondary settings button. The dark override keys off
+DSH's resolved `body[data-ds-dark-theme]` attribute (not the operating system
+color scheme), so it follows the app's Light/Dark/System preference.
 
 ## Commit behavior
 

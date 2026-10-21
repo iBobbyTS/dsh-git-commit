@@ -99,9 +99,21 @@ test('Client loader mounts overlay and right-sidebar settings, tracking on-scree
   const one = Pill(props);
   assert.notEqual(one, null, 'visible Session must produce the floating pill');
   assert.equal(nodes(one, (node) => node.props?.className === 'dgc-branch')[0].props.title, '/repo-one');
-  const settings = nodes(one, (node) => node.type === 'button' && node.props?.title === 'Commit settings');
-  assert.equal(settings.length, 1);
-  settings[0].props.onClick();
+  const buttons = nodes(one, node => node.type === 'button' && node.props?.className?.includes('dgc-icon-button'));
+  assert.equal(buttons.length, 2, 'both floating actions have icon-only controls');
+  for (const button of buttons) {
+    assert.ok(button.props['aria-label'], 'accessible action label');
+    assert.ok(button.props.title, 'native tooltip');
+    assert.equal(button.children.length, 1, 'no visible text in action');
+    assert.equal(button.children[0].type, 'svg');
+    assert.equal(button.children[0].props['aria-hidden'], true);
+  }
+  assert.ok(buttons[0].props['aria-label'].includes('commit'));
+  assert.equal(buttons[1].props['aria-label'], 'Commit settings');
+  assert.ok(appendedStyles[0].textContent.includes('body[data-ds-dark-theme] .dgc-card'));
+  assert.ok(appendedStyles[0].textContent.includes('body[data-ds-dark-theme] .dgc-primary'));
+  assert.ok(appendedStyles[0].textContent.includes('body[data-ds-dark-theme] .dgc-secondary'));
+  buttons[1].props.onClick();
   assert.deepEqual(opened, ['gitCommitSettings']);
 
   selected.id = 's2';
