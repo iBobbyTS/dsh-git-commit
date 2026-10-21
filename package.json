@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-commit",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "description": "Floating Git stats and AI commits with native DSH LLM, authenticated RPC, settings and shared service",
   "license": "MIT",

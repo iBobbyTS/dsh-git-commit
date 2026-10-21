@@ -3,43 +3,76 @@ import assert from 'node:assert/strict';
 import { apply, inject } from '../lib/index.js';
 import { generateMessage } from '../lib/core/message.js';
 
-// Test the public host registration contract without a live DSH process.
-test('Host exposes a native service and the authenticated Connection RPC channel', async () => {
-  const services=[];
-  const handlers=[];
-  const routes=[];
-  // DSH Connection registers RPC routes through the *caller's* webServer.
-  // Model the Cordis injection guard so missing dependencies fail this test.
-  const ctx={
-    reflect:{provide:(name,service)=>{services.push({name,service});return ()=>{};}},
-    effect:(dispose)=>{handlers.push({dispose});},
-    get webServer() {
-      if (!inject.includes('webServer')) throw new Error('cannot get property "webServer" without inject');
-      return { register: route => { routes.push(route); return () => {}; } };
+// Regression for the actual DSH failure: the Connection service's own context
+// does not inject webServer. A new Connection RPC channel accessed that property
+// and threw even when the caller listed webServer in its own inject array.
+// The standard /api Fetch seam must not access ctx.webServer or rpc.handle().
+test('Host mounts on the authenticated /api Fetch seam without webServer', async () => {
+  const services = [];
+  const effects = [];
+  const routes = [];
+  const ctx = {
+    reflect: { provide: (name, service) => { services.push({ name, service }); return () => {}; } },
+    effect: (factory) => { effects.push(factory); return () => {}; },
+    get webServer() { throw new Error('cannot get property "webServer" without inject'); },
+    connection: {
+      rpc: { handle: () => { throw new Error('RPC handle is not suitable for an external DSH plugin'); } },
+      fetch: { register: (route) => { routes.push(route); return async () => {}; } },
     },
-    connection:{rpc:{handle:(channel,handler)=>{
-      ctx.webServer.register({kind:'prefix',path:channel});
-      handlers.push({channel,handler});
-      return ()=>{};
-    }}},
-    get:()=>undefined,
-    llm:{listProviders:()=>[],listModels:async()=>[]},
+    get: () => undefined,
+    llm: { listProviders: () => [], listModels: async () => [] },
   };
-  assert.deepEqual(inject,['connection','llm','webServer']);
+  assert.deepEqual(inject, ['connection', 'llm']);
   apply(ctx);
-  assert.equal(services[0].name,'gitCommit');
-  const channel=handlers.find(x=>x.channel);
-  assert.equal(channel.channel,'/git-commit');
-  assert.deepEqual(routes, [{kind:'prefix',path:'/git-commit'}]);
-  const forbidden=await channel.handler('models',{},new AbortController().signal,{principal:{kind:'guest'}});
-  assert.equal(forbidden.ok,false);
-  assert.equal(forbidden.error.code,'FORBIDDEN');
-  const unavailable=await channel.handler('unknown',{},new AbortController().signal,{principal:{kind:'owner'}});
-  assert.equal(unavailable.ok,false);
-  const ok=await channel.handler('models',{},new AbortController().signal,{principal:{kind:'owner'}});
-  assert.equal(ok.ok,true);
-  assert.deepEqual(ok.value.models,[]);
-  await handlers.find(x=>x.dispose)?.dispose();
+  // Real Cordis effects execute their factories as part of registration.
+  const cleanups = effects.map(factory => factory());
+  assert.equal(services[0].name, 'gitCommit');
+  assert.equal(routes.length, 1);
+  const route = routes[0];
+  assert.deepEqual({ path: route.path, methods: route.methods, requestBody: route.requestBody },
+    { path: '/api/git-commit', methods: ['POST'], requestBody: 'buffered' });
+
+  const call = async (method, payload = {}, overrides = {}) => {
+    const rpcId = overrides.rpcId ?? 'test-rpc-id';
+    const request = new Request('http://localhost/api/git-commit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId, method: 'git-commit', payload: { method, payload } }),
+    });
+    const response = await route.fetch(request);
+    const data = await response.json();
+    return { response, data };
+  };
+
+  const ok = await call('models');
+  assert.equal(ok.response.status, 200);
+  assert.equal(ok.response.headers.get('cache-control'), 'no-store');
+  assert.equal(ok.data.type, 'server-response');
+  assert.equal(ok.data.rpcId, 'test-rpc-id');
+  assert.equal(ok.data.result.ok, true);
+  assert.deepEqual(ok.data.result.value.models, []);
+  const missing = await call('invalid-method');
+  assert.equal(missing.data.result.ok, false);
+  assert.equal(missing.data.result.error.code, 'NOT_FOUND');
+  const fail = await call('status', { cwd: '/this/path/does/not/exist' });
+  assert.equal(fail.data.result.ok, false);
+  assert.equal(fail.data.result.error.code, 'GIT_COMMIT_ERROR');
+
+  const malformed = await route.fetch(new Request('http://localhost/api/git-commit', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{not JSON}',
+  }));
+  assert.equal(malformed.status, 400);
+  const unacceptable = await route.fetch(new Request('http://localhost/api/git-commit', {
+    method: 'POST', headers: { 'content-type': 'text/plain' }, body: 'x',
+  }));
+  assert.equal(unacceptable.status, 415);
+  const wrongEndpoint = await route.fetch(new Request('http://localhost/api/git-commit', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId: 'id', method: 'nope', payload: { method: 'models' } }),
+  }));
+  assert.equal(wrongEndpoint.status, 400);
+
+  await Promise.all(cleanups.map(async cleanup => { if (typeof cleanup === 'function') await cleanup(); }));
 });
 
 test('large diff uses map/reduce and preserves instructions in the final request', async () => {

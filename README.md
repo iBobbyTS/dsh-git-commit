@@ -99,14 +99,25 @@ without removing built-in bundles. The bundle applies [cordis.patch.yml](cordis.
 registering the Host plugin and loading `./client` through the Web client module
 loader. Restart the affected DSH Host/profile.
 
-The Host declares `connection`, `llm`, and **`webServer`** as mandatory Cordis
-injections: `ctx.connection.rpc.handle()` registers a route through the caller's
-`webServer`. DSH denies implicit access to undeclared services, including when
-the route itself implements Connection authentication.
+The Host injects only `connection` and `llm`. The authenticated `/api`
+transport is owned by DSH Connection, and the plugin registers an exact route
+through `connection.fetch.register()`. It does not require or access the
+`webServer` service directly.
 
 The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6.4.0` dependency. It uses the DSH Host's existing `connection`, `llm`, `slots`, and `sidebarRight` services; the right-side UI requires the standard DSH Web/Desktop shell.
 
-> **Security:** UI requests go through **`ctx.connection.rpc.handle('/git-commit', …)`**, which uses DSH's authenticated Host/Origin request policy. This is intentional: `ctx.webServer.register()` alone does not provide authentication, and the plugin exposes an actual Git mutation action.
+> **Security:** UI requests use **`ctx.connection.fetch.register({ path: '/api/git-commit', ... })`**, reusing the authenticated DSH `/api` carrier and its Owner/Host/Origin checks. The browser uses the standard `ctx.connection.rpc.call('/api', 'git-commit', ...)` request envelope. Importantly, this avoids `ctx.connection.rpc.handle()` creating a new channel, which reads `webServer` from the Connection service's *own* injection scope and caused plugin activation to fail. A bare `ctx.webServer.register()` would bypass authentication and is not used.
+
+### Updating a failed 0.1.0 / 0.1.1 Desktop installation
+
+Use Plugins → **Uninstall** (not only the enable toggle) and install the Git URL again.
+DSH's package manager can retain the previous Git checkout when it already
+matches the installed spec; explicitly remove the installed package first.
+Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.2**.
+
+The previous `webServer` inject addition in 0.1.1 was insufficient because
+`connection.rpc.handle()` uses a shadow Context originating in the Connection
+provider, not the consumer's declared dependencies. v0.1.2 avoids that route.
 
 ## Calling the commit API from another DSH Host plugin
 
@@ -141,7 +152,7 @@ Result example (the values are illustrative):
 
 A failure returns `{ success:false, status:'failure', scope, additions:0, deletions:0, message:'', hash:null, error:'...' }` and **never invents a commit hash**. `commit({cwd, message:'...'})` is supported when another plugin already has a prepared commit message; it still follows the exact same staged/all semantics and snapshot safeguards. `status({cwd})`, `changeToken({cwd})`, `settings({cwd})`, `saveSettings({cwd,patch})` and `models()` are also available. See [`lib/index.d.ts`](lib/index.d.ts).
 
-The Client uses the same Host service over the authenticated `/git-commit` Connection RPC channel (`status`, `changeToken`, `settings`, `saveSettings`, `models`, `commit`). Because the client passes the active workspace `cwd` and the Host resolves the canonical repository root, multiple Sessions and Git worktrees can be supported without assuming all Sessions use the same checkout.
+The Client uses the existing authenticated `/api` Connection RPC transport with endpoint `git-commit` (payload method: `status`, `changeToken`, `settings`, `saveSettings`, `models`, `commit`). Because the client passes the active workspace `cwd` and the Host resolves the canonical repository root, multiple Sessions and Git worktrees can be supported without assuming all Sessions use the same checkout.
 
 ## Tests
 
