@@ -138,6 +138,29 @@ function clientHarness({ initial = 'one', failSave = false } = {}) {
 const matchButton = (name) => node=>node.type==='button' && node.props['aria-label']===name;
 const textOf = node=> typeof node === 'string' ? node : Array.isArray(node) ? node.map(textOf).join(' ') : (node?.children??[]).map(textOf).join(' ');
 
+test('initial empty Session does not crash the global overlay; navigating to a repository activates it',async()=>{
+  // In DSH the root shell mounts before a Session is selected. Previously,
+  // optional-chain undefined === cwd undefined was true and null.data threw,
+  // permanently retiring the shell.overlay entry for every later Session.
+  const t=clientHarness({initial:null});
+  const pill=t.mount('shell.overlay');
+  assert.doesNotThrow(()=>t.render(pill));
+  assert.equal(t.render(pill),null,'without selected Session no panel should show');
+  t.selected.value='one';
+  const loading=t.render(pill);
+  assert.notEqual(loading,null,'selecting a Session reactivates the same mount');
+  await t.settle();
+  const ready=t.render(pill);
+  const branch=readVirtualDom(ready,node=>node.props?.className==='dgc-branch');
+  assert.equal(branch.length,1);
+  assert.equal(branch[0].props.title,'/example/repo-one');
+  assert.equal(textOf(branch[0]),'main');
+  // Switching away later must again avoid a null-data dereference.
+  t.selected.value=null;
+  assert.equal(t.render(pill),null);
+  t.unmount(pill);
+});
+
 test('Client manifest, visible Git panel, collapse and reopen use icon-only controls',async()=>{
   const t=clientHarness();
   assert.equal(t.styleTags[0].dataset.dshGitCommit,'true');

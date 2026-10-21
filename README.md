@@ -118,6 +118,18 @@ without removing built-in bundles. The bundle applies [cordis.patch.yml](cordis.
 registering the Host plugin and loading `./client` through the Web client module
 loader. Restart the affected DSH Host/profile.
 
+### Fix for missing overlay after upgrading to 0.1.5
+
+Version 0.1.5 introduced a startup-only null dereference in the Client's
+Session-scoped status cache: before any Session was selected, both the current
+`cwd` and the optional-chained `statusEntry?.cwd` were `undefined`, so equality
+succeeded and the code accessed `statusEntry.data` while it was `null`.
+That could crash and retire the root overlay before opening any project, making
+all Git and non-Git projects appear to have no floating panel.
+Version **0.1.6** checks the cache record for non-null *before* comparing paths.
+Its regression test starts with no Session, enters a Git project, and leaves the
+Session again without recreating the plugin.
+
 ### Diagnosing a missing floating panel
 
 The floating panel renders only when **a Conversation Session is actually visible**;
@@ -150,7 +162,7 @@ The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6
 Use Plugins → **Uninstall** (not only the enable toggle) and install the Git URL again.
 DSH's package manager can retain the previous Git checkout when it already
 matches the installed spec; explicitly remove the installed package first.
-Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.5**.
+Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.6**.
 
 Earlier versions had two separate startup/UI issues: v0.1.1 registered RPC
 through the Connection provider's shadow context and incorrectly accessed
