@@ -25,17 +25,22 @@ export interface GitCommitSettings {
   repositoryInstruction: string;
   inheritGlobal: boolean;
   model: { provider: string; model: string } | null;
+  /** True for a Git working tree; false for global-only settings in ordinary directories. */
+  isRepository: boolean;
+  /** Canonical Git root, or null outside a repository. */
+  root: string | null;
 }
 export interface GitCommitApi {
   commit(request: GitCommitRequest): Promise<GitCommitResult>;
-  status(request: GitCommitRequest): Promise<{
-    root: string; repo: string; branch: string; head: string;
-    additions: number; deletions: number; binary: number;
-    untracked: number; unknownUntrackedLines: number; stagedFiles: number;
-  }>;
-  changeToken(request: GitCommitRequest): Promise<{ token: number }>;
-  settings(request: GitCommitRequest): Promise<GitCommitSettings>;
-  saveSettings(request: GitCommitRequest & { patch: Partial<GitCommitSettings> }): Promise<GitCommitSettings>;
+  status(request: GitCommitRequest): Promise<
+    | { isRepository: false; root: null }
+    | { isRepository: true; root: string; repo: string; branch: string; head: string;
+        additions: number; deletions: number; binary: number;
+        untracked: number; unknownUntrackedLines: number; stagedFiles: number }
+  >;
+  changeToken(request: GitCommitRequest): Promise<{ token: number | null }>;
+  settings(request?: GitCommitRequest): Promise<GitCommitSettings>;
+  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model'>> }): Promise<GitCommitSettings>;
   models(): Promise<{ models: Array<{provider:string;providerName:string;model:string;name:string}>; defaultModel: {provider:string;model:string}|null }>;
 }
 declare module '@deepseek-ai/cordis' {

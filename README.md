@@ -2,7 +2,7 @@
 
 An independent **DeepSeek Harness (DSH)** plugin providing a three-row floating Git status panel, one-click AI-generated commits, repository-specific writing instructions, a native right-sidebar settings tab, and a reusable **Host service** for other plugins.
 
-> **Validation status:** Git mutation and service logic are tested with real temporary Git repositories. A browser-loader/component smoke test checks that the floating panel renders for the mounted Session, and the manifest dependencies are checked against DSH's published client packages. **An installed Desktop end-to-end run and a live model call still require user-side verification**.
+> **Validation status:** Git mutation and service logic are tested with real temporary Git repositories. A browser-loader/component smoke test checks that the floating panel renders for the mounted Session, and the manifest dependencies are checked against DSH’s published client packages. **An installed Desktop end-to-end run and a live model call still require user-side verification**.
 
 ## UI
 
@@ -10,24 +10,22 @@ The floating panel uses the DSH `shell.overlay` slot and appears above the conve
 
 ```
 ┌─────────────────────┐
-│ ⠿  feature/my-work   │
+│ ⠿  feature/my-work ⌄ │
 │ +248        −73      │
-│ [   ◉   ] [   ⚙   ] │
+│ [ Commit ] [Settings]│
 └─────────────────────┘
+
+Collapsed: [  Git icon  ]
+Non-Git: [ Not a git repository ]
 ```
 
-* **Row 1:** branch name for the currently visible Conversation Session (tracked through the public `ctx.sidebarRight.mounted` observable; with detached-HEAD support).
+* **Row 1:** branch name for the currently visible Conversation Session, with an upper-right collapse button. Collapsing leaves only a clickable Git icon, which expands on click and has the exact tooltip **Git commit** (no repository path). The mounted Session is tracked through the public `ctx.sidebarRight.mounted` observable.
 * **Row 2:** added/deleted lines relative to HEAD. Tracks staged and unstaged tracked files, plus readable untracked text files. Untracked binary files and files over 4 MiB are excluded from numeric line counts; they remain eligible for commit.
-* **Row 3:** two icon-only controls: Git commit symbol for `Commit`, gear for `Settings`. Both retain accessible labels and tooltips. Commit runs immediately, displaying the outcome beneath the three rows, and is disabled when nothing can be committed.
+* **Row 3:** `Commit` and `Settings` buttons. Commit runs immediately, displaying an outcome beneath the three rows. The button is disabled if nothing is detected to commit.
 * `Settings` opens the native DSH **right sidebar** through `ctx.sidebarRight.openTab('gitCommitSettings')` — not a custom web modal.
+* Outside a Git repository, the floating panel displays only **Not a git repository**. Commit, Settings and Collapse controls are unavailable. An already-open Settings tab remains usable for global instructions and model selection.
 
 Git status updates are event-driven on the Host (`fs.watch` for worktree and Git metadata, with 160 ms debounce and a one-second starvation cap). The browser polls only a *cheap numeric change token* every 900 ms and runs the Git status command only when the token changes. A 30-second full-refresh fallback accounts for lost OS events. External editors, shell commands, Agent Edit/Write tools and other processes are observed when they modify the same local filesystem.
-
-The light palette is unchanged. In dark mode, the floating card uses a graphite/blue-gray
-surface with a subtle border and shadow, a near-black primary commit button,
-and a muted charcoal secondary settings button. The dark override keys off
-DSH's resolved `body[data-ds-dark-theme]` attribute (not the operating system
-color scheme), so it follows the app's Light/Dark/System preference.
 
 ## Commit behavior
 
@@ -43,16 +41,31 @@ An aborted/failed Git command never reports success. The plugin does not push, f
 
 ## Settings
 
-`Settings` opens the **right sidebar** with the following controls:
+`Settings` opens the DSH native right sidebar, ordered exactly as follows:
 
-| Field | Scope | Default |
-|---|---|---|
-| Global commit instruction | All repositories | Empty |
-| Inherit global instruction | Per repository | **Checked** |
-| Repository commit instruction | Current canonical repository | Empty |
-| Model | Global; from DSH configured models | DSH's current default model |
+1. **Git commit settings** heading
+2. **Global commit instruction** (textarea)
+3. **Model** (configured DSH provider/model selection)
+4. Divider
+5. **Inherit global instruction** (per-repository checkbox, default checked)
+6. **Repository commit instruction** (textarea)
+7. Canonical Git repository path, shown as code beneath the textarea
 
-Click **Save settings** to persist changes. Both instructions are sent to the model when inheritance is checked, with repository instructions taking precedence in conflicts. When unchecked, **only** the repository instruction is sent. The plugin provides its own fixed accuracy/safety instructions in both cases.
+In a non-Git directory (or if the panel remains open after switching from a
+repository), only the global instruction and model controls are available. Below
+the divider it displays **Not a git repository**, without repository controls.
+The floating panel does not permit opening Settings from a non-Git directory.
+
+**Automatic persistence:** there is no Save button and no Saved message.
+Text edits are debounced for 400 ms and flushed when the textarea loses focus
+or the sidebar unmounts; checkbox and model changes are saved immediately.
+Each request saves *only changed fields*, and requests are serialized to avoid
+an older response overwriting newer edits. Failures retain pending changes
+for a later edit/retry and display an error. Successful saves remain silent.
+Global settings persist even if there is no Git repository; a non-Git scope
+never creates fake repository entries. With inheritance checked, both global
+and repository instructions reach the model, and repository-specific instructions
+take precedence in conflicts.
 
 The selected LLM provider/model comes from `ctx.llm.listProviders()` / `listModels()` and is invoked directly via `ctx.llm.stream()`; it does **not** create another agent, require separate API keys, or edit the main Agent's chosen model.
 
@@ -137,7 +150,7 @@ The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6
 Use Plugins → **Uninstall** (not only the enable toggle) and install the Git URL again.
 DSH's package manager can retain the previous Git checkout when it already
 matches the installed spec; explicitly remove the installed package first.
-Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.3**.
+Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.5**.
 
 Earlier versions had two separate startup/UI issues: v0.1.1 registered RPC
 through the Connection provider's shadow context and incorrectly accessed
@@ -189,7 +202,7 @@ npm test
 npm run check
 ```
 
-Tests use temporary *real Git repositories* for staged-only vs all-files commits, untracked files, worktree changes during generation, accurate return values, settings persistence, reasoning metadata, and oversized diff batching. The Client test executes the published `window.__ModuleLoader__` factory in a simulated browser with observable on-screen Session selection. It verifies the floating panel, settings button, and sidebar registration, plus the supported-client-package manifest. No provider key is required. An actual Desktop host/browser integration test and a live LLM call are still needed.
+Tests use temporary *real Git repositories* for staged-only vs all-files commits, untracked files, worktree changes during generation, accurate return values, settings persistence, reasoning metadata, and oversized diff batching. The Client test executes the published `window.__ModuleLoader__` factory with simulated browser and React hooks. It verifies the Git/non-Git floating panels, collapse/expand control, icon-only buttons, settings ordering, automatic field-level saves and failure visibility, plus the supported-client-package manifest. A real temporary non-Git directory test checks global-only persistence and recognition of a later `git init`. No provider key is required. An actual Desktop host/browser integration test and a live LLM call are still needed.
 
 ## Reference implementations and licensing
 

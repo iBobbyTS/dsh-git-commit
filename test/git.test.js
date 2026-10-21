@@ -127,3 +127,38 @@ test('settings persist per-repository inherit toggle and global model',async()=>
     assert.deepEqual((await store.get('/b')).model,{provider:'mock',model:'x'});
   } finally {await rm(base,{recursive:true,force:true});}
 });
+
+test('non-Git workspaces expose a neutral status and editable global settings without creating repo entries',async()=>{
+  const base=await mkdtemp(join(tmpdir(),'dgc-plain-'));
+  try {
+    await mkdir(join(base,'视频'));
+    const cwd=join(base,'视频');
+    const store=new InstructionStore(join(base,'settings.json'));
+    const service=new GitCommitService({
+      ...ctx,
+      llm:{...ctx.llm,resolveModelInfo:async()=>({reasoning:{efforts:[{id:'off'}]}})},
+    }, {store});
+    const status=await service.status({cwd});
+    assert.deepEqual(status,{isRepository:false,root:null});
+    assert.deepEqual(await service.changeToken({cwd}),{token:null});
+    assert.deepEqual(await service.settings({cwd}),{
+      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,
+      isRepository:false,root:null,
+    });
+    const saved=await service.saveSettings({cwd,patch:{globalInstruction:'No scope',model:{provider:'mock',model:'x'}}});
+    assert.equal(saved.isRepository,false);
+    assert.equal(saved.globalInstruction,'No scope');
+    assert.deepEqual(saved.model,{provider:'mock',model:'x'});
+    assert.deepEqual((await service.settings({})).model,{provider:'mock',model:'x'});
+    await assert.rejects(service.saveSettings({cwd,patch:{repositoryInstruction:'reject'}}),/require a Git repository/);
+    await assert.rejects(service.saveSettings({cwd,patch:{inheritGlobal:false}}),/require a Git repository/);
+    const raw=JSON.parse(await readFile(join(base,'settings.json'),'utf8'));
+    assert.deepEqual(raw.repositories,{},'non-Git global edits must not create a fake repository');
+    await git(cwd,['init','-b','main']);
+    const now=await service.status({cwd});
+    assert.equal(now.isRepository,true);
+    assert.equal(now.branch,'main');
+    assert.equal((await service.settings({cwd})).isRepository,true);
+    service.close();
+  }finally{await rm(base,{recursive:true,force:true});}
+});
