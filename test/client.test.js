@@ -39,13 +39,13 @@ function readVirtualDom(node, predicate, found = []) {
 }
 
 /** Minimal hook scheduler runs the published browser bundle (including effects). */
-function clientHarness({ initial = 'one', failSave = false } = {}) {
+function clientHarness({ initial = 'one', failSave = false, initialHide = false, branchName = 'main' } = {}) {
   const sessions = { ids: ['one', 'two'], byId: {
     one: { id: 'one', cwd: '/example/repo-one' },
     two: { id: 'two', cwd: '/example/plain-directory' },
   }};
   const selected = { value: initial, subscribe: () => () => {}, getSnapshot() { return selected.value; } };
-  const saved = { globalInstruction: 'Global', model: null };
+  const saved = { globalInstruction: 'Global', model: null, autoHideNonGit: initialHide };
   const repoConfig = { repositoryInstruction: 'Repository', inheritGlobal: true };
   const calls = [];
   let activeScope;
@@ -95,7 +95,7 @@ function clientHarness({ initial = 'one', failSave = false } = {}) {
       let value;
       if(method==='changeToken') value={token:payload.cwd.includes('repo-one') ? 1 : null};
       else if(method==='status')value=payload.cwd.includes('repo-one')
-        ? {isRepository:true,root:'/example/repo-one',branch:'main',additions:268,deletions:141,stagedFiles:0,untracked:0,binary:0}
+        ? {isRepository:true,root:'/example/repo-one',branch:branchName,additions:268,deletions:141,stagedFiles:0,untracked:0,binary:0}
         : {isRepository:false,root:null};
       else if(method==='settings')value=payload.cwd.includes('repo-one')
         ? {...saved,...repoConfig,isRepository:true,root:'/example/repo-one'}
@@ -153,7 +153,7 @@ test('initial empty Session does not crash the global overlay; navigating to a r
   const ready=t.render(pill);
   const branch=readVirtualDom(ready,node=>node.props?.className==='dgc-branch');
   assert.equal(branch.length,1);
-  assert.equal(branch[0].props.title,'/example/repo-one');
+  assert.equal(branch[0].props.title,'main');
   assert.equal(textOf(branch[0]),'main');
   // Switching away later must again avoid a null-data dereference.
   t.selected.value=null;
@@ -170,7 +170,7 @@ test('Client manifest, visible Git panel, collapse and reopen use icon-only cont
   t.render(p);
   await t.settle();
   const expanded=t.render(p);
-  assert.equal(readVirtualDom(expanded,n=>n.props?.className==='dgc-branch')[0].props.title,'/example/repo-one');
+  assert.equal(readVirtualDom(expanded,n=>n.props?.className==='dgc-branch')[0].props.title,'main');
   const commit=readVirtualDom(expanded,matchButton('Stage and commit all changes'));
   assert.equal(commit.length,1);
   assert.equal(commit[0].children[0].type,'svg','icon rather than a label');
@@ -179,13 +179,15 @@ test('Client manifest, visible Git panel, collapse and reopen use icon-only cont
   assert.equal(settings[0].children[0].type,'svg');
   settings[0].props.onClick();
   assert.deepEqual(t.opened,['gitCommitSettings']);
-  readVirtualDom(expanded,matchButton('Collapse Git commit'))[0].props.onClick();
+  readVirtualDom(expanded,matchButton('Collapse Git commit'))[0].props.onClick({currentTarget:{closest:()=>({offsetTop:260})}});
   const collapsed=t.render(p);
   const git=readVirtualDom(collapsed,matchButton('Git commit'));
   assert.equal(git.length,1);
   assert.equal(git[0].props.title,'Git commit');
   assert.equal(readVirtualDom(collapsed,n=>n.props?.className==='dgc-branch').length,0);
   assert.equal(readVirtualDom(collapsed,n=>n.type==='button').length,1);
+  assert.equal(collapsed.props.style.top,260,'collapse must preserve upper-right corner');
+  assert.equal(collapsed.props.style.right,24);
   assert.equal(git[0].children[0].type,'svg');
   git[0].props.onClick();
   assert.equal(readVirtualDom(t.render(p),matchButton('Collapse Git commit')).length,1);
@@ -200,7 +202,7 @@ test('Non-Git panel has only neutral text; accidentally opened settings are glob
   const dom=t.render(p);
   assert.equal(readVirtualDom(dom,n=>n.props?.className==='dgc-no-repo').length,1);
   assert.match(textOf(dom),/Not a git repository/);
-  assert.equal(readVirtualDom(dom,n=>n.type==='button').length,0);
+  assert.deepEqual(readVirtualDom(dom,n=>n.type==='button').map(n=>n.props['aria-label']),['Collapse Git commit']);
   assert.equal(readVirtualDom(dom,n=>n.props?.className==='dgc-error').length,0);
   const tab=t.mount('sidebar.right.pane.tab');
   t.render(tab);
@@ -209,7 +211,8 @@ test('Non-Git panel has only neutral text; accidentally opened settings are glob
   const fields=readVirtualDom(page,n=>n.type==='label').map(textOf);
   assert.match(fields.join('|'),/Global commit instruction.*Model/s);
   assert.doesNotMatch(fields.join('|'),/Repository commit instruction|Inherit global instruction/);
-  assert.ok(readVirtualDom(page,n=>n.type==='hr').length===1);
+  assert.equal(readVirtualDom(page,n=>n.type==='hr').length,2);
+  assert.equal(readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox').length,1);
   assert.match(textOf(page),/Not a git repository/);
   assert.equal(readVirtualDom(page,n=>n.type==='button').length,0);
   const global=readVirtualDom(page,n=>n.type==='textarea')[0];
@@ -228,9 +231,9 @@ test('Repository settings follow requested order, auto-save partial patches, and
   const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
   const page=t.render(tab);
   const tags=readVirtualDom(page,n=>['h3','label','hr','code','button'].includes(n.type)).map(n=>({type:n.type,text:textOf(n)}));
-  assert.deepEqual(tags.map(t=>t.type),['h3','label','label','hr','label','label','code']);
+  assert.deepEqual(tags.map(t=>t.type),['h3','label','label','hr','label','label','code','hr','label']);
   assert.equal(tags[0].text,'Git commit settings');
-  assert.equal(tags.at(-1).text,'/example/repo-one');
+  assert.equal(tags.find(t=>t.type==='code').text,'/example/repo-one');
   assert.doesNotMatch(textOf(page),/Saved|Save settings/);
   readVirtualDom(page,n=>n.type==='input' && n.props.type==='checkbox')[0].props.onChange({target:{checked:false}});
   await t.settle();
@@ -253,4 +256,110 @@ test('Repository settings follow requested order, auto-save partial patches, and
   await failing.settle();
   assert.match(textOf(failing.render(ft)),/Failed to save settings: Permission denied/);
   failing.unmount(ft);failing.unmount(fp);
+});
+
+test('Collapsed Git button drags without expanding, and click preserves upper-right anchor', async () => {
+  const t=clientHarness();
+  const p=t.mount('shell.overlay');
+  t.render(p); await t.settle();
+  let expanded=t.render(p);
+  const fold=readVirtualDom(expanded,matchButton('Collapse Git commit'))[0];
+  fold.props.onClick({currentTarget:{closest:()=>({offsetTop:310})}});
+  let collapsed=t.render(p);
+  assert.equal(collapsed.props.style.top,310);
+  assert.equal(collapsed.props.style.right,24);
+  let icon=readVirtualDom(collapsed,matchButton('Git commit'))[0];
+  const root={offsetTop:310};
+  const currentTarget={closest:()=>root,setPointerCapture:()=>{},releasePointerCapture:()=>{}};
+  const down={button:0,pointerId:7,clientX:100,clientY:180,currentTarget};
+  icon.props.onPointerDown(down);
+  icon.props.onPointerMove({...down,clientX:80,clientY:207});
+  const moved=t.render(p);
+  assert.equal(moved.props.style.top,337);
+  assert.equal(moved.props.style.right,44);
+  icon.props.onPointerUp({...down,clientX:80,clientY:207});
+  icon.props.onClick();
+  assert.equal(readVirtualDom(t.render(p),matchButton('Git commit')).length,1,'release click after drag must not unfold');
+  // A subsequent normal click has <4px movement and does unfold.
+  collapsed=t.render(p);
+  icon=readVirtualDom(collapsed,matchButton('Git commit'))[0];
+  icon.props.onPointerDown({...down,clientX:140,clientY:205});
+  icon.props.onPointerMove({...down,clientX:141,clientY:206});
+  icon.props.onPointerUp({...down,clientX:141,clientY:206});
+  icon.props.onClick();
+  expanded=t.render(p);
+  assert.equal(readVirtualDom(expanded,matchButton('Collapse Git commit')).length,1);
+  assert.equal(expanded.props.style.top,337);
+  assert.equal(expanded.props.style.right,44);
+  // Repeated collapse after dragging does not jump down to the original bottom anchor.
+  readVirtualDom(expanded,matchButton('Collapse Git commit'))[0].props.onClick({currentTarget:{closest:()=>({offsetTop:337})}});
+  assert.equal(t.render(p).props.style.top,337);
+  t.unmount(p);
+});
+
+test('Non-Git panel folds to crossed Git icon, drags and respects automatic hide from settings', async () => {
+  const t=clientHarness({initial:'two'});
+  const p=t.mount('shell.overlay');
+  t.render(p);await t.settle();
+  let expanded=t.render(p);
+  assert.match(textOf(expanded),/Not a git repository/);
+  assert.deepEqual(readVirtualDom(expanded,n=>n.type==='button').map(n=>n.props['aria-label']),['Collapse Git commit']);
+  readVirtualDom(expanded,matchButton('Collapse Git commit'))[0].props.onClick({currentTarget:{closest:()=>({offsetTop:246})}});
+  let compact=t.render(p);
+  assert.equal(compact.props.style.top,246);
+  assert.equal(readVirtualDom(compact,n=>n.props?.className==='dgc-git-cross').length,1);
+  assert.equal(readVirtualDom(compact,matchButton('Git commit')).length,1);
+  const button=readVirtualDom(compact,matchButton('Git commit'))[0];
+  const currentTarget={closest:()=>({offsetTop:246}),setPointerCapture(){},releasePointerCapture(){}};
+  const mouse={button:0,pointerId:8,clientX:180,clientY:260,currentTarget};
+  button.props.onPointerDown(mouse);
+  button.props.onPointerMove({...mouse,clientX:210,clientY:235});
+  button.props.onPointerUp({...mouse,clientX:210,clientY:235});
+  button.props.onClick();
+  compact=t.render(p);
+  assert.equal(compact.props.style.top,221);
+  assert.equal(compact.props.style.right,6,'right edge should remain within drag clamp');
+  assert.equal(readVirtualDom(compact,n=>n.props?.className==='dgc-git-cross').length,1);
+
+  // The settings tab can remain open after navigating to a non-Git directory.
+  const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
+  const page=t.render(tab);
+  const hide=readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox');
+  assert.equal(hide.length,1);
+  assert.equal(hide[0].props.checked,false,'new setting defaults to disabled');
+  hide[0].props.onChange({target:{checked:true}});
+  assert.equal(t.render(p),null,'Non-Git floating panel hides immediately');
+  await t.settle();
+  assert.equal(t.saved.autoHideNonGit,true);
+  const patches=t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch);
+  assert.deepEqual(JSON.parse(JSON.stringify(patches)),[{autoHideNonGit:true}]);
+
+  // Return to a Git Session: even with hide enabled the compact Git icon reappears without a cross.
+  t.selected.value='one';t.render(p);await t.settle();
+  const gitCompact=t.render(p);
+  assert.notEqual(gitCompact,null);
+  assert.equal(readVirtualDom(gitCompact,n=>n.props?.className==='dgc-git-cross').length,0);
+  t.selected.value='two';t.render(p);await t.settle();
+  assert.equal(t.render(p),null);
+  t.unmount(tab);t.unmount(p);
+
+  const persisted=clientHarness({initial:'two',initialHide:true});
+  const persistedPill=persisted.mount('shell.overlay');persisted.render(persistedPill);await persisted.settle();
+  assert.equal(persisted.render(persistedPill),null,'restarting Client honors persisted preference');
+  persisted.unmount(persistedPill);
+});
+
+test('Branch tooltip uses full name, and icon action sizing plus max width are constrained',async()=>{
+  const fullBranch='feature/very-long-branch-name-for-refactoring-with-extra-details';
+  const t=clientHarness({branchName:fullBranch});
+  const p=t.mount('shell.overlay');t.render(p);await t.settle();
+  const branch=readVirtualDom(t.render(p),n=>n.props?.className==='dgc-branch')[0];
+  assert.equal(branch.props.title,fullBranch);
+  assert.equal(branch.props.title,textOf(branch),'tooltip contains the complete branch, even when CSS truncates it');
+  assert.notEqual(branch.props.title,'/example/repo-one');
+  const css=t.styleTags[0].textContent;
+  assert.match(css,/\.dgc-card\{[^}]*width:max-content;min-width:102px;max-width:216px/);
+  assert.match(css,/\.dgc-actions \.dgc-primary,\.dgc-actions \.dgc-secondary\{[^}]*width:36px;height:36px/);
+  assert.match(css,/\.dgc-actions\{[^}]*justify-content:flex-start/);
+  t.unmount(p);
 });

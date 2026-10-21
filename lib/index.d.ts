@@ -24,6 +24,8 @@ export interface GitCommitSettings {
   globalInstruction: string;
   repositoryInstruction: string;
   inheritGlobal: boolean;
+  /** Global preference, defaults to false; affects floating panel only. */
+  autoHideNonGit: boolean;
   model: { provider: string; model: string } | null;
   /** True for a Git working tree; false for global-only settings in ordinary directories. */
   isRepository: boolean;
@@ -40,7 +42,7 @@ export interface GitCommitApi {
   >;
   changeToken(request: GitCommitRequest): Promise<{ token: number | null }>;
   settings(request?: GitCommitRequest): Promise<GitCommitSettings>;
-  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model'>> }): Promise<GitCommitSettings>;
+  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model' | 'autoHideNonGit'>> }): Promise<GitCommitSettings>;
   models(): Promise<{ models: Array<{provider:string;providerName:string;model:string;name:string}>; defaultModel: {provider:string;model:string}|null }>;
 }
 declare module '@deepseek-ai/cordis' {

@@ -142,7 +142,7 @@ test('non-Git workspaces expose a neutral status and editable global settings wi
     assert.deepEqual(status,{isRepository:false,root:null});
     assert.deepEqual(await service.changeToken({cwd}),{token:null});
     assert.deepEqual(await service.settings({cwd}),{
-      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,
+      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,autoHideNonGit:false,
       isRepository:false,root:null,
     });
     const saved=await service.saveSettings({cwd,patch:{globalInstruction:'No scope',model:{provider:'mock',model:'x'}}});
@@ -161,4 +161,24 @@ test('non-Git workspaces expose a neutral status and editable global settings wi
     assert.equal((await service.settings({cwd})).isRepository,true);
     service.close();
   }finally{await rm(base,{recursive:true,force:true});}
+});
+
+test('Automatic non-Git hide is an independent global boolean persisted across repositories', async()=>{
+  const base=await mkdtemp(join(tmpdir(),'dgc-visibility-'));
+  try {
+    const filename=join(base,'settings.json');
+    const store=new InstructionStore(filename);
+    assert.equal((await store.get(null)).autoHideNonGit,false);
+    await store.save('/one',{autoHideNonGit:true});
+    const fresh=new InstructionStore(filename);
+    assert.equal((await fresh.get(null)).autoHideNonGit,true);
+    assert.equal((await fresh.get('/one')).autoHideNonGit,true);
+    assert.equal((await fresh.get('/other')).autoHideNonGit,true);
+    assert.equal((await fresh.save(null,{autoHideNonGit:false})).autoHideNonGit,false);
+    assert.equal((await new InstructionStore(filename).get('/one')).autoHideNonGit,false);
+    await assert.rejects(store.save(null,{autoHideNonGit:'yes'}),/autoHideNonGit must be a boolean/);
+    assert.equal((await fresh.get(null)).autoHideNonGit,false);
+    const raw=JSON.parse(await readFile(filename,'utf8'));
+    assert.equal(raw.global.autoHideNonGit,false);
+  } finally { await rm(base,{recursive:true,force:true}); }
 });

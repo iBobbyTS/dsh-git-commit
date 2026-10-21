@@ -8,22 +8,25 @@ An independent **DeepSeek Harness (DSH)** plugin providing a three-row floating 
 
 The floating panel uses the DSH `shell.overlay` slot and appears above the conversation, with a drag handle:
 
-```
-┌─────────────────────┐
-│ ⠿  feature/my-work ⌄ │
-│ +248        −73      │
-│ [ Commit ] [Settings]│
-└─────────────────────┘
+```text
+┌──────────────────────┐
+│ ⠿ feature/my-work  ⌄ │
+│ +248      −73         │
+│ [ ◉ ] [ ⚙ ]          │
+└──────────────────────┘
 
-Collapsed: [  Git icon  ]
-Non-Git: [ Not a git repository ]
+Collapsed Git:         [ Git icon ]
+Collapsed non-Git:     [ Git icon + red × ]
+Expanded non-Git:      [ Not a git repository  ⌄ ]
 ```
 
-* **Row 1:** branch name for the currently visible Conversation Session, with an upper-right collapse button. Collapsing leaves only a clickable Git icon, which expands on click and has the exact tooltip **Git commit** (no repository path). The mounted Session is tracked through the public `ctx.sidebarRight.mounted` observable.
+* **Row 1:** current branch name (its hover tooltip shows the **complete branch name**, not the repository path), drag grip, and upper-right collapse button. The visible Session is tracked through the public `ctx.sidebarRight.mounted` observable.
 * **Row 2:** added/deleted lines relative to HEAD. Tracks staged and unstaged tracked files, plus readable untracked text files. Untracked binary files and files over 4 MiB are excluded from numeric line counts; they remain eligible for commit.
-* **Row 3:** `Commit` and `Settings` buttons. Commit runs immediately, displaying an outcome beneath the three rows. The button is disabled if nothing is detected to commit.
+* **Row 3:** two **36 × 36 px**, left-aligned icon buttons: Git Commit and Settings. Commit runs immediately, displaying the outcome beneath the rows, and is disabled if nothing is detected to commit.
+* **Sizing:** the expanded card grows as needed for the two actions, added/deleted counts and branch (ellipsis for long branch names) but never exceeds the original **216 px** maximum. Minimum size accommodates the larger of the action row and statistics row, plus padding. The compact card remains **44 × 44 px**.
+* **Collapse and drag:** collapse keeps the **upper-right corner** fixed rather than the lower-right corner. The collapsed Git icon can be dragged with a pointer; moving it does **not** also click to expand. A normal click expands it. The tooltip on the compact icon is **Git commit**.
+* **Non-Git workspaces:** show a neutral **Not a git repository** row with a collapse control; the compact Git icon gets a **red ×**. Neither state offers Commit or Settings. The text area in the expanded non-Git row can be dragged. An already-open Settings tab remains usable for global controls.
 * `Settings` opens the native DSH **right sidebar** through `ctx.sidebarRight.openTab('gitCommitSettings')` — not a custom web modal.
-* Outside a Git repository, the floating panel displays only **Not a git repository**. Commit, Settings and Collapse controls are unavailable. An already-open Settings tab remains usable for global instructions and model selection.
 
 Git status updates are event-driven on the Host (`fs.watch` for worktree and Git metadata, with 160 ms debounce and a one-second starvation cap). The browser polls only a *cheap numeric change token* every 900 ms and runs the Git status command only when the token changes. A 30-second full-refresh fallback accounts for lost OS events. External editors, shell commands, Agent Edit/Write tools and other processes are observed when they modify the same local filesystem.
 
@@ -50,15 +53,24 @@ An aborted/failed Git command never reports success. The plugin does not push, f
 5. **Inherit global instruction** (per-repository checkbox, default checked)
 6. **Repository commit instruction** (textarea)
 7. Canonical Git repository path, shown as code beneath the textarea
+8. Divider
+9. **Automatically hide floating window in non-git projects** (global checkbox; default **unchecked**)
 
 In a non-Git directory (or if the panel remains open after switching from a
-repository), only the global instruction and model controls are available. Below
-the divider it displays **Not a git repository**, without repository controls.
-The floating panel does not permit opening Settings from a non-Git directory.
+repository), the global instruction, model and automatic-hide checkbox remain
+available. The repository section displays **Not a git repository** rather than
+repository-specific fields; the floating panel does not permit opening Settings
+from a non-Git directory. When the global checkbox is on, the floating window
+is completely hidden in non-Git projects, including the crossed compact icon,
+and reappears in Git projects. When it is off, non-Git projects can display and
+collapse the neutral warning. The preference is shared across all repositories
+and persists across Desktop restarts; the Client also updates immediately when
+it is changed in the Settings tab.
 
 **Automatic persistence:** there is no Save button and no Saved message.
 Text edits are debounced for 400 ms and flushed when the textarea loses focus
-or the sidebar unmounts; checkbox and model changes are saved immediately.
+or the sidebar unmounts; checkbox and model changes (including automatic hide)
+are saved immediately.
 Each request saves *only changed fields*, and requests are serialized to avoid
 an older response overwriting newer edits. Failures retain pending changes
 for a later edit/retry and display an error. Successful saves remain silent.
@@ -145,7 +157,7 @@ document.querySelector('[data-shell-overlay] .dgc-root')
 - Missing manifest entry: check that the installed bundle is enabled in the **Desktop** profile.
 - Manifest entry, but no `style` element: the Client module did not activate (check Console).
 - Style exists, but no `.dgc-root`: confirm that a Conversation Session is on screen;
-  a component crash or missing Session identity will also appear in DevTools.
+  a component crash, missing Session identity, or the enabled non-Git auto-hide setting can also explain the absence.
 - `.dgc-root` exists, but cannot be seen: inspect CSS/layout in the Elements panel.
 
 The Host injects only `connection` and `llm`. The authenticated `/api`
@@ -162,7 +174,7 @@ The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6
 Use Plugins → **Uninstall** (not only the enable toggle) and install the Git URL again.
 DSH's package manager can retain the previous Git checkout when it already
 matches the installed spec; explicitly remove the installed package first.
-Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.6**.
+Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.7**.
 
 Earlier versions had two separate startup/UI issues: v0.1.1 registered RPC
 through the Connection provider's shadow context and incorrectly accessed
