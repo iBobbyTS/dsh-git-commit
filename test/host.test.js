@@ -7,18 +7,30 @@ import { generateMessage } from '../lib/core/message.js';
 test('Host exposes a native service and the authenticated Connection RPC channel', async () => {
   const services=[];
   const handlers=[];
+  const routes=[];
+  // DSH Connection registers RPC routes through the *caller's* webServer.
+  // Model the Cordis injection guard so missing dependencies fail this test.
   const ctx={
     reflect:{provide:(name,service)=>{services.push({name,service});return ()=>{};}},
     effect:(dispose)=>{handlers.push({dispose});},
-    connection:{rpc:{handle:(channel,handler)=>{handlers.push({channel,handler});return ()=>{};}}},
+    get webServer() {
+      if (!inject.includes('webServer')) throw new Error('cannot get property "webServer" without inject');
+      return { register: route => { routes.push(route); return () => {}; } };
+    },
+    connection:{rpc:{handle:(channel,handler)=>{
+      ctx.webServer.register({kind:'prefix',path:channel});
+      handlers.push({channel,handler});
+      return ()=>{};
+    }}},
     get:()=>undefined,
     llm:{listProviders:()=>[],listModels:async()=>[]},
   };
-  assert.deepEqual(inject,['connection','llm']);
+  assert.deepEqual(inject,['connection','llm','webServer']);
   apply(ctx);
   assert.equal(services[0].name,'gitCommit');
   const channel=handlers.find(x=>x.channel);
   assert.equal(channel.channel,'/git-commit');
+  assert.deepEqual(routes, [{kind:'prefix',path:'/git-commit'}]);
   const forbidden=await channel.handler('models',{},new AbortController().signal,{principal:{kind:'guest'}});
   assert.equal(forbidden.ok,false);
   assert.equal(forbidden.error.code,'FORBIDDEN');

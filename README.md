@@ -67,14 +67,42 @@ This is a deliberate light-weight commit summarizer, **not a code-review agent**
 
 ## Install into DSH
 
-After cloning this repository:
+### Desktop (macOS / Windows)
+
+Use **Plugins → Add plugin → Install a third-party plugin** in Desktop, enter
+`https://github.com/iBobbyTS/dsh-git-commit.git`, and select **Enable now**.
+If upgrading from a previously failed installation, use the Plugins page to
+**Remove** the old copy first, then install the latest GitHub revision and enable it.
+Fully **Quit** DSH and reopen it (closing the window alone can leave its Host running).
+
+Alternatively, on macOS use **Manage dsh Command… → Install** to make Desktop's
+bundled CLI available. Open Desktop once to initialize its profile, quit it,
+and run:
 
 ```sh
-# Profile name depends on your installed DSH configuration.
+dsh plugin --profile desktop remove dsh-git-commit   # only for an older installation
+dsh plugin --profile desktop add https://github.com/iBobbyTS/dsh-git-commit.git
+```
+
+The Desktop CLI is distinct from a separately installed npm `dsh` binary.
+Do not use `--profile web` when you want to install into Desktop.
+
+### Web profile or development checkout
+
+```sh
 dsh plugin --profile web add /absolute/path/to/dsh-git-commit
 ```
 
-Add `dsh-git-commit` to the profile's `dsh.profile.bundles` list, alongside `@deepseek-ai/dsh-base` / `@deepseek-ai/dsh-web-app` as applicable. The bundle processes [cordis.patch.yml](cordis.patch.yml), registering the Host plugin and loading `./client` through the Web client module loader. Restart the affected DSH Host/profile.
+If a CLI installation is not automatically enabled, select the bundle in the
+Plugins UI or add `dsh-git-commit` to the existing `dsh.profile.bundles` list
+without removing built-in bundles. The bundle applies [cordis.patch.yml](cordis.patch.yml),
+registering the Host plugin and loading `./client` through the Web client module
+loader. Restart the affected DSH Host/profile.
+
+The Host declares `connection`, `llm`, and **`webServer`** as mandatory Cordis
+injections: `ctx.connection.rpc.handle()` registers a route through the caller's
+`webServer`. DSH denies implicit access to undeclared services, including when
+the route itself implements Connection authentication.
 
 The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6.4.0` dependency. It uses the DSH Host's existing `connection`, `llm`, `slots`, and `sidebarRight` services; the right-side UI requires the standard DSH Web/Desktop shell.
 
