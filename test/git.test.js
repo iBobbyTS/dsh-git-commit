@@ -7,6 +7,7 @@ import { git, repoRoot, visibleStatus, plannedMode, preparedSnapshot, commitPrep
 import { GitCommitService } from '../lib/core/service.js';
 import { InstructionStore } from '../lib/core/store.js';
 import { reasoningSelection, activeInstructions, makeBatches, cleanMessage } from '../lib/core/message.js';
+import { summarizeLlmCalls } from '../lib/core/metrics.js';
 
 async function fixture(fn) {
   const root = await mkdtemp(join(tmpdir(), 'dgc-test-'));
@@ -142,7 +143,7 @@ test('non-Git workspaces expose a neutral status and editable global settings wi
     assert.deepEqual(status,{isRepository:false,root:null});
     assert.deepEqual(await service.changeToken({cwd}),{token:null});
     assert.deepEqual(await service.settings({cwd}),{
-      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,autoHideNonGit:false,
+      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,autoHideNonGit:false,showTokenDetails:false,countdownColor:'#f59e0b',
       isRepository:false,root:null,
     });
     const saved=await service.saveSettings({cwd,patch:{globalInstruction:'No scope',model:{provider:'mock',model:'x'}}});
@@ -182,3 +183,91 @@ test('Automatic non-Git hide is an independent global boolean persisted across r
     assert.equal(raw.global.autoHideNonGit,false);
   } finally { await rm(base,{recursive:true,force:true}); }
 });
+
+
+test('TokenUsage aggregation counts cache writes once and computes true decode speed across overlapping Map calls',()=>{
+  const usage=summarizeLlmCalls([
+    {startedAt:0,firstTokenAt:100,endedAt:1100,
+      usage:{inputTokens:100,outputTokens:200,cacheReadTokens:10,cacheWriteTokens:20,reasoningTokens:5}},
+    {startedAt:50,firstTokenAt:120,endedAt:1120,
+      usage:{inputTokens:50,outputTokens:100,cacheReadTokens:30}},
+  ]);
+  assert.deepEqual(usage,{
+    calls:2,inputTokens:210,outputTokens:300,cacheReadTokens:40,cacheWriteTokens:20,
+    reasoningTokens:5,latencyMs:100,durationMs:1120,outputSpeedTps:150,
+  });
+  assert.equal(summarizeLlmCalls([]),null);
+  const incomplete=summarizeLlmCalls([
+    {startedAt:5,firstTokenAt:null,endedAt:10,usage:null},
+    {startedAt:10,firstTokenAt:15,endedAt:20,usage:{inputTokens:2,outputTokens:5}},
+  ]);
+  assert.equal(incomplete.calls,2);
+  assert.equal(incomplete.inputTokens,null,'do not present partial/missing provider usage as complete');
+  assert.equal(incomplete.outputTokens,null);
+  assert.equal(incomplete.outputSpeedTps,null);
+  assert.equal(incomplete.latencyMs,10);
+});
+
+test('global token details and countdown color persist with strict validation and old settings compatibility',async()=>{
+  const base=await mkdtemp(join(tmpdir(),'dgc-telemetry-'));
+  try {
+    const path=join(base,'settings.json');
+    const store=new InstructionStore(path);
+    assert.equal((await store.get(null)).showTokenDetails,false);
+    assert.equal((await store.get(null)).countdownColor,'#f59e0b');
+    const next=await store.save(null,{showTokenDetails:true,countdownColor:'#AB45C0'});
+    assert.equal(next.showTokenDetails,true);
+    assert.equal(next.countdownColor,'#ab45c0');
+    assert.equal((await new InstructionStore(path).get('/repository')).showTokenDetails,true);
+    assert.equal((await new InstructionStore(path).get('/repository')).countdownColor,'#ab45c0');
+    await assert.rejects(store.save(null,{showTokenDetails:'yes'}),/showTokenDetails must be a boolean/);
+    await assert.rejects(store.save(null,{countdownColor:'red'}),/#RRGGBB/);
+    await assert.rejects(store.save(null,{countdownColor:'#abcd'}),/#RRGGBB/);
+    // Old v0.1.7 settings have no new fields. No migration required.
+    await writeFile(path,JSON.stringify({version:1,global:{instruction:'legacy',model:null},repositories:{}}));
+    assert.deepEqual({showTokenDetails:(await store.get(null)).showTokenDetails,
+      countdownColor:(await store.get(null)).countdownColor},
+      {showTokenDetails:false,countdownColor:'#f59e0b'});
+  } finally { await rm(base,{recursive:true,force:true}); }
+});
+
+test('direct AI calls aggregate metrics in existing programmatic commit response, while caller-supplied messages do not',async()=>fixture(async root=>{
+  await writeFile(join(root,'a.txt'),'one\nnew\n');
+  let count=0;
+  const llm={listProviders:()=>[{id:'mock',name:'Mock'}],
+    listModels:async()=>[{id:'model',name:'Model'}],
+    resolveModelInfo:async()=>({reasoning:{efforts:[{id:'off'}]}})};
+  const service=new GitCommitService({...ctx,llm},{
+    store:new InstructionStore(join(root,'.git','telemetry-settings.json')),
+    callModel:async()=>{
+      await new Promise(resolve=>setTimeout(resolve,20));
+      return {text:'summary',firstTokenMs:2,
+        usage:{inputTokens:10+count++,cacheReadTokens:5,cacheWriteTokens:3,outputTokens:20}};
+    },
+    generator:async(_snap,_settings,call)=>{
+      await Promise.all([
+        call({system:'test',prompt:'map1',maxTokens:20}),
+        call({system:'test',prompt:'map2',maxTokens:20}),
+      ]);
+      await call({system:'test',prompt:'reduce',maxTokens:20});
+      return 'feat: generated with metrics';
+    },
+  });
+  try {
+    const result=await service.commit({cwd:root});
+    assert.equal(result.success,true,result.error);
+    assert.equal(result.llm.calls,3);
+    assert.equal(result.llm.inputTokens,57,'uncached 33 plus cache-read 15 and cache-write 9');
+    assert.equal(result.llm.outputTokens,60);
+    assert.equal(result.llm.cacheReadTokens,15);
+    assert.equal(result.llm.cacheWriteTokens,9);
+    assert.ok(result.llm.latencyMs!==null&&result.llm.latencyMs>=0);
+    assert.ok(result.llm.outputSpeedTps!==null&&result.llm.outputSpeedTps>0);
+    assert.ok(result.llm.durationMs>=20);
+    assert.ok(result.totalDurationMs>=result.llm.durationMs);
+    await writeFile(join(root,'a.txt'),'one\nnew\nthird\n');
+    const manual=await service.commit({cwd:root,message:'test: caller supplied'});
+    assert.equal(manual.success,true);
+    assert.equal(Object.hasOwn(manual,'llm'),false,'no LLM calls means no fabricated TokenUsage');
+  } finally {service.close();}
+}));

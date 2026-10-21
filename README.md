@@ -27,6 +27,8 @@ Expanded non-Git:      [ Not a git repository  ⌄ ]
 * **Collapse and drag:** collapse keeps the **upper-right corner** fixed rather than the lower-right corner. The collapsed Git icon can be dragged with a pointer; moving it does **not** also click to expand. A normal click expands it. The tooltip on the compact icon is **Git commit**.
 * **Non-Git workspaces:** show a neutral **Not a git repository** row with a collapse control; the compact Git icon gets a **red ×**. Neither state offers Commit or Settings. The text area in the expanded non-Git row can be dragged. An already-open Settings tab remains usable for global controls.
 * `Settings` opens the native DSH **right sidebar** through `ctx.sidebarRight.openTab('gitCommitSettings')` — not a custom web modal.
+* **Success notification (10 seconds):** appears beneath the action row, then disappears automatically. It shows **exactly two commit lines**: `Committed <hash> · +<additions> −<deletions>` in a compact **monospaced** font, followed by **only the first line of the Commit Message** in the normal UI font. A thin countdown bar shrinks from full to empty over ten seconds; its default color is orange (`#f59e0b`). A new commit restarts both the timer and bar. Failed commits retain an actionable error rather than falsely showing a completed notification.
+* **Optional Token details:** when enabled, the third line beneath the commit subject is monospaced: `↓ <total input> · ↑ <output> | <TTFT>s · <decode speed>t/s`. Unavailable provider statistics use `—` rather than an invented zero. If another plugin supplies the message without invoking an LLM, Token details correctly report unavailable values.
 
 Git status updates are event-driven on the Host (`fs.watch` for worktree and Git metadata, with 160 ms debounce and a one-second starvation cap). The browser polls only a *cheap numeric change token* every 900 ms and runs the Git status command only when the token changes. A 30-second full-refresh fallback accounts for lost OS events. External editors, shell commands, Agent Edit/Write tools and other processes are observed when they modify the same local filesystem.
 
@@ -55,6 +57,8 @@ An aborted/failed Git command never reports success. The plugin does not push, f
 7. Canonical Git repository path, shown as code beneath the textarea
 8. Divider
 9. **Automatically hide floating window in non-git projects** (global checkbox; default **unchecked**)
+10. **Show token details** (global checkbox; default **unchecked**)
+11. **Countdown color** (global `#RRGGBB` color picker; default **orange `#f59e0b`**)
 
 In a non-Git directory (or if the panel remains open after switching from a
 repository), the global instruction, model and automatic-hide checkbox remain
@@ -69,8 +73,7 @@ it is changed in the Settings tab.
 
 **Automatic persistence:** there is no Save button and no Saved message.
 Text edits are debounced for 400 ms and flushed when the textarea loses focus
-or the sidebar unmounts; checkbox and model changes (including automatic hide)
-are saved immediately.
+or the sidebar unmounts; checkbox, model and countdown-color changes are saved immediately.
 Each request saves *only changed fields*, and requests are serialized to avoid
 an older response overwriting newer edits. Failures retain pending changes
 for a later edit/retry and display an error. Successful saves remain silent.
@@ -82,6 +85,8 @@ take precedence in conflicts.
 The selected LLM provider/model comes from `ctx.llm.listProviders()` / `listModels()` and is invoked directly via `ctx.llm.stream()`; it does **not** create another agent, require separate API keys, or edit the main Agent's chosen model.
 
 Reasoning effort is deliberately **not** a UI setting: `ctx.llm.resolveModelInfo()` returns adapter-owned ordered effort IDs, from which the plugin selects `off`/`none` if advertised, otherwise the lowest available level. If no reasoning metadata is exposed, the provider default is used.
+
+Global Token display and countdown color also persist alongside existing instructions; old v1 files missing these keys use the documented defaults without migration. Color inputs are validated as six-digit hexadecimal CSS colors.
 
 Settings are stored atomically in `$DSH_HOME/dsh-git-commit.json` (or `~/.dsh/dsh-git-commit.json` without `DSH_HOME`), mode `0600` for newly written files; no configuration files are created inside the repository. Repository entries are keyed by the resolved Git root path.
 
@@ -174,7 +179,7 @@ The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6
 Use Plugins → **Uninstall** (not only the enable toggle) and install the Git URL again.
 DSH's package manager can retain the previous Git checkout when it already
 matches the installed spec; explicitly remove the installed package first.
-Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.7**.
+Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.8**.
 
 Earlier versions had two separate startup/UI issues: v0.1.1 registered RPC
 through the Connection provider's shadow context and incorrectly accessed
@@ -211,9 +216,22 @@ Result example (the values are illustrative):
   "deletions": 73,
   "message": "feat(api): validate session refresh tokens",
   "hash": "ac1234e",
-  "fullHash": "ac1234e..."
+  "fullHash": "ac1234e...",
+  "llm": {
+    "calls": 3,
+    "inputTokens": 12450,
+    "outputTokens": 680,
+    "cacheReadTokens": 8000,
+    "cacheWriteTokens": 100,
+    "latencyMs": 710,
+    "durationMs": 4200,
+    "outputSpeedTps": 91.2
+  },
+  "totalDurationMs": 5400
 }
 ```
+
+**LLM statistics:** a direct `ctx.llm.stream()` emits a provider-reported `usage` chunk (some routes omit counters) and model text/reasoning deltas. The plugin uses `BlockAssembler.usage` plus local monotonic timestamps; no separate model request is needed. Total input = uncached `inputTokens` + `cacheReadTokens` + `cacheWriteTokens`. Reasoning output is **already included** in output tokens. For a large Diff, the plugin sums Token usage over all Map/Reduce calls. Latency is the wall-clock delay from the first model request to the **earliest content token**; output speed is total emitted completion tokens divided by the sum of each call's decoding time, which avoids overstating throughput when Map calls overlap. `llm.durationMs` measures LLM phase wall time; `totalDurationMs` includes Git preparation and committing. Usage remains `null` if any contributing request lacks an authoritative provider usage event. The `llm` field is omitted entirely when a caller supplies the message and no model is invoked.
 
 A failure returns `{ success:false, status:'failure', scope, additions:0, deletions:0, message:'', hash:null, error:'...' }` and **never invents a commit hash**. `commit({cwd, message:'...'})` is supported when another plugin already has a prepared commit message; it still follows the exact same staged/all semantics and snapshot safeguards. `status({cwd})`, `changeToken({cwd})`, `settings({cwd})`, `saveSettings({cwd,patch})` and `models()` are also available. See [`lib/index.d.ts`](lib/index.d.ts).
 
@@ -226,7 +244,7 @@ npm test
 npm run check
 ```
 
-Tests use temporary *real Git repositories* for staged-only vs all-files commits, untracked files, worktree changes during generation, accurate return values, settings persistence, reasoning metadata, and oversized diff batching. The Client test executes the published `window.__ModuleLoader__` factory with simulated browser and React hooks. It verifies the Git/non-Git floating panels, collapse/expand control, icon-only buttons, settings ordering, automatic field-level saves and failure visibility, plus the supported-client-package manifest. A real temporary non-Git directory test checks global-only persistence and recognition of a later `git init`. No provider key is required. An actual Desktop host/browser integration test and a live LLM call are still needed.
+Tests use temporary *real Git repositories* for staged-only vs all-files commits, untracked files, worktree changes during generation, accurate return values, settings persistence, reasoning metadata, and oversized diff batching. The Client test executes the published `window.__ModuleLoader__` factory with simulated browser and React hooks. It verifies Git/non-Git floating panels, collapse/expand control, icon-only buttons, setting ordering and persistence, the two-line success confirmation, three requested font treatments, ten-second auto-dismiss, live countdown color changes, optional Token details, field-level saves/failures, and supported-client-package manifest. Host tests cover TokenUsage aggregation across concurrent model requests and retaining the existing cross-plugin return contract. A real temporary non-Git directory test checks global-only persistence and recognition of a later `git init`. No provider key is required. An actual Desktop host/browser integration test and a live LLM call are still needed.
 
 ## Reference implementations and licensing
 

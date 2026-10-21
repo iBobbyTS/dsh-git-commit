@@ -8,6 +8,22 @@ export interface GitCommitRequest {
   message?: string;
   signal?: AbortSignal;
 }
+/** Provider usage totals and local monotonic timings across all Map/Reduce LLM calls. */
+export interface GitCommitLlmMetrics {
+  calls: number;
+  /** Total input including uncached, cache-read, and cache-write tokens. Null if usage unavailable. */
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  reasoningTokens: number | null;
+  /** Earliest content token across calls, relative to first request's start. */
+  latencyMs: number | null;
+  /** LLM phase elapsed wall-clock time; includes overlapping Map calls only once. */
+  durationMs: number;
+  /** Total output tokens / sum of per-call decoding times. Null if data incomplete. */
+  outputSpeedTps: number | null;
+}
 export interface GitCommitResult {
   success: boolean;
   status: 'success' | 'failure';
@@ -18,6 +34,9 @@ export interface GitCommitResult {
   /** Exactly the first seven characters of the resulting commit OID, or null upon failure. */
   hash: string | null;
   fullHash?: string;
+  /** Present when an LLM was invoked; caller-supplied messages omit this. */
+  llm?: GitCommitLlmMetrics;
+  totalDurationMs?: number;
   error?: string;
 }
 export interface GitCommitSettings {
@@ -26,6 +45,10 @@ export interface GitCommitSettings {
   inheritGlobal: boolean;
   /** Global preference, defaults to false; affects floating panel only. */
   autoHideNonGit: boolean;
+  /** Global setting; defaults to false. */
+  showTokenDetails: boolean;
+  /** Progress bar color in #rrggbb form; defaults to orange (#f59e0b). */
+  countdownColor: string;
   model: { provider: string; model: string } | null;
   /** True for a Git working tree; false for global-only settings in ordinary directories. */
   isRepository: boolean;
@@ -42,7 +65,7 @@ export interface GitCommitApi {
   >;
   changeToken(request: GitCommitRequest): Promise<{ token: number | null }>;
   settings(request?: GitCommitRequest): Promise<GitCommitSettings>;
-  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model' | 'autoHideNonGit'>> }): Promise<GitCommitSettings>;
+  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model' | 'autoHideNonGit' | 'showTokenDetails' | 'countdownColor'>> }): Promise<GitCommitSettings>;
   models(): Promise<{ models: Array<{provider:string;providerName:string;model:string;name:string}>; defaultModel: {provider:string;model:string}|null }>;
 }
 declare module '@deepseek-ai/cordis' {

@@ -39,13 +39,13 @@ function readVirtualDom(node, predicate, found = []) {
 }
 
 /** Minimal hook scheduler runs the published browser bundle (including effects). */
-function clientHarness({ initial = 'one', failSave = false, initialHide = false, branchName = 'main' } = {}) {
+function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main' } = {}) {
   const sessions = { ids: ['one', 'two'], byId: {
     one: { id: 'one', cwd: '/example/repo-one' },
     two: { id: 'two', cwd: '/example/plain-directory' },
   }};
   const selected = { value: initial, subscribe: () => () => {}, getSnapshot() { return selected.value; } };
-  const saved = { globalInstruction: 'Global', model: null, autoHideNonGit: initialHide };
+  const saved = { globalInstruction: 'Global', model: null, autoHideNonGit: initialHide, showTokenDetails: initialShowTokens, countdownColor: initialColor };
   const repoConfig = { repositoryInstruction: 'Repository', inheritGlobal: true };
   const calls = [];
   let activeScope;
@@ -77,10 +77,19 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     createElement: () => ({ dataset: {}, remove() {} }),
     head: { appendChild: item => styleTags.push(item) },
   };
-  let nextInterval=1;
-  const intervals=new Map();
+  let nextInterval=1, nextExpiry=1;
+  const intervals=new Map(), expiries=new Map();
+  const testTimeout=(fn,delay)=>{
+    // Keep the ten-second notification timeout deterministic and fast.
+    if (delay>=9000 && delay<=10000) { const id=nextExpiry++; expiries.set(id,fn); return id; }
+    return setTimeout(fn,delay);
+  };
+  const cancelTimeout=id=>{
+    if (typeof id==='number' && expiries.delete(id)) return;
+    clearTimeout(id);
+  };
   runInNewContext(readFileSync(new URL('../lib/client.js',import.meta.url),'utf8'), {
-    window,document,setTimeout,clearTimeout,
+    window,document,setTimeout:testTimeout,clearTimeout:cancelTimeout,
     setInterval:(fn)=>{const id=nextInterval++; intervals.set(id,fn);return id;},
     clearInterval:(id)=>intervals.delete(id),
   });
@@ -106,7 +115,13 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
         Object.assign(saved,payload.patch);
         if(payload.cwd.includes('repo-one'))Object.assign(repoConfig,payload.patch);
         value={...saved,...repoConfig,isRepository:payload.cwd.includes('repo-one')};
-      }else throw new Error(`Unexpected RPC ${method}`);
+      }else if(method==='commit')value={
+        success:true,scope:'all',hash:'e9f98bd',additions:268,deletions:141,
+        message:'feat(ui): show a commit summary\n\nBody: intentionally hidden in the overlay',
+        llm:{calls:3,inputTokens:12450,outputTokens:680,cacheReadTokens:8000,
+          cacheWriteTokens:100,latencyMs:710,outputSpeedTps:91.2,durationMs:4100},
+      };
+      else throw new Error(`Unexpected RPC ${method}`);
       return {ok:true,value};
     } }},
     sidebarRight:{mounted:selected,openTab:kind=>opened.push(kind)},
@@ -132,7 +147,8 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
   }
   function unmount(scope){for(const slot of scope.hooks)if(typeof slot?.cleanup==='function')slot.cleanup();}
   const settle=()=>new Promise(resolve=>setImmediate(resolve));
-  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle};
+  const fireExpiry=()=>{const current=[...expiries.values()];expiries.clear();current.forEach(fn=>fn());};
+  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry};
 }
 
 const matchButton = (name) => node=>node.type==='button' && node.props['aria-label']===name;
@@ -212,7 +228,7 @@ test('Non-Git panel has only neutral text; accidentally opened settings are glob
   assert.match(fields.join('|'),/Global commit instruction.*Model/s);
   assert.doesNotMatch(fields.join('|'),/Repository commit instruction|Inherit global instruction/);
   assert.equal(readVirtualDom(page,n=>n.type==='hr').length,2);
-  assert.equal(readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox').length,1);
+  assert.equal(readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox').length,2);
   assert.match(textOf(page),/Not a git repository/);
   assert.equal(readVirtualDom(page,n=>n.type==='button').length,0);
   const global=readVirtualDom(page,n=>n.type==='textarea')[0];
@@ -231,7 +247,7 @@ test('Repository settings follow requested order, auto-save partial patches, and
   const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
   const page=t.render(tab);
   const tags=readVirtualDom(page,n=>['h3','label','hr','code','button'].includes(n.type)).map(n=>({type:n.type,text:textOf(n)}));
-  assert.deepEqual(tags.map(t=>t.type),['h3','label','label','hr','label','label','code','hr','label']);
+  assert.deepEqual(tags.map(t=>t.type),['h3','label','label','hr','label','label','code','hr','label','label','label']);
   assert.equal(tags[0].text,'Git commit settings');
   assert.equal(tags.find(t=>t.type==='code').text,'/example/repo-one');
   assert.doesNotMatch(textOf(page),/Saved|Save settings/);
@@ -325,7 +341,7 @@ test('Non-Git panel folds to crossed Git icon, drags and respects automatic hide
   const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
   const page=t.render(tab);
   const hide=readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox');
-  assert.equal(hide.length,1);
+  assert.equal(hide.length,2);
   assert.equal(hide[0].props.checked,false,'new setting defaults to disabled');
   hide[0].props.onChange({target:{checked:true}});
   assert.equal(t.render(p),null,'Non-Git floating panel hides immediately');
@@ -362,4 +378,78 @@ test('Branch tooltip uses full name, and icon action sizing plus max width are c
   assert.match(css,/\.dgc-actions \.dgc-primary,\.dgc-actions \.dgc-secondary\{[^}]*width:36px;height:36px/);
   assert.match(css,/\.dgc-actions\{[^}]*justify-content:flex-start/);
   t.unmount(p);
+});
+
+
+test('successful commit shows only monospaced summary, ordinary-font subject, optional monospaced metrics, and ten-second countdown',async()=>{
+  const t=clientHarness({initialShowTokens:true,initialColor:'#ec8400'});
+  const pill=t.mount('shell.overlay');
+  t.render(pill);await t.settle();t.render(pill);
+  const button=readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0];
+  await button.props.onClick();
+  const shown=t.render(pill);
+  const head=readVirtualDom(shown,n=>n.props?.className==='dgc-result-head');
+  const subject=readVirtualDom(shown,n=>n.props?.className==='dgc-result-subject');
+  const metrics=readVirtualDom(shown,n=>n.props?.className==='dgc-result-metrics');
+  assert.equal(head.length,1);
+  assert.equal(textOf(head[0]),'Committed e9f98bd · +268 −141');
+  assert.equal(textOf(subject[0]),'feat(ui): show a commit summary');
+  assert.doesNotMatch(textOf(shown),/Body: intentionally hidden/);
+  assert.equal(textOf(metrics[0]),'↓ 12,450 · ↑ 680 | 0.71s · 91.2t/s');
+  const color=readVirtualDom(shown,n=>n.props?.className==='dgc-countdown-fill');
+  assert.equal(color.length,1);
+  assert.equal(color[0].props.style.backgroundColor,'#ec8400');
+  assert.match(t.styleTags[0].textContent,/\.dgc-result-head\{[^}]*ui-monospace/);
+  assert.match(t.styleTags[0].textContent,/\.dgc-result-subject\{[^}]*system-ui/);
+  assert.match(t.styleTags[0].textContent,/\.dgc-result-metrics\{[^}]*ui-monospace/);
+  assert.match(t.styleTags[0].textContent,/@keyframes dgc-countdown\{from\{transform:scaleX\(1\)\}to\{transform:scaleX\(0\)\}\}/);
+  t.fireExpiry();
+  assert.equal(readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-feedback').length,0,
+    'ten-second timer must remove all success details and progress');
+  t.unmount(pill);
+});
+
+test('settings automatically persist Show token details and Countdown color, synchronized with floating panel',async()=>{
+  const t=clientHarness();
+  const pill=t.mount('shell.overlay');t.render(pill);await t.settle();t.render(pill);
+  const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
+  let form=t.render(tab);
+  const tokenLabel=readVirtualDom(form,n=>n.type==='label'&&textOf(n).includes('Show token details'))[0];
+  assert.equal(tokenLabel.children[0].props.checked,false);
+  tokenLabel.children[0].props.onChange({target:{checked:true}});
+  form=t.render(tab);
+  const colorInput=readVirtualDom(form,n=>n.type==='input'&&n.props.type==='color')[0];
+  assert.equal(colorInput.props.value,'#f59e0b');
+  colorInput.props.onChange({target:{value:'#11AA33'}});
+  await t.settle();
+  assert.equal(t.saved.showTokenDetails,true);
+  assert.equal(t.saved.countdownColor,'#11AA33');
+  assert.deepEqual(JSON.parse(JSON.stringify(t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch))),
+    [{showTokenDetails:true},{countdownColor:'#11AA33'}]);
+  // No old Save button or new success notice.
+  assert.doesNotMatch(textOf(t.render(tab)),/Saved|Save settings/);
+  await readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0].props.onClick();
+  const showing=t.render(pill);
+  assert.equal(readVirtualDom(showing,n=>n.props?.className==='dgc-result-metrics').length,1);
+  assert.equal(readVirtualDom(showing,n=>n.props?.className==='dgc-countdown-fill')[0].props.style.backgroundColor,'#11aa33');
+  // Changing the checkbox immediately removes only the optional metrics line.
+  const checkbox=readVirtualDom(t.render(tab),n=>n.type==='label'&&textOf(n).includes('Show token details'))[0].children[0];
+  checkbox.props.onChange({target:{checked:false}});
+  assert.equal(readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-result-metrics').length,0);
+  assert.equal(readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-result-head').length,1);
+  t.unmount(tab);t.unmount(pill);
+});
+
+test('commit confirmation remains two lines without tokens when details disabled, and expires after ten seconds',async()=>{
+  const t=clientHarness();
+  const pill=t.mount('shell.overlay');t.render(pill);await t.settle();t.render(pill);
+  await readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0].props.onClick();
+  const shown=t.render(pill);
+  assert.equal(readVirtualDom(shown,n=>n.props?.className==='dgc-result-head').length,1);
+  assert.equal(readVirtualDom(shown,n=>n.props?.className==='dgc-result-subject').length,1);
+  assert.equal(readVirtualDom(shown,n=>n.props?.className==='dgc-result-metrics').length,0);
+  assert.equal(readVirtualDom(shown,n=>n.props?.className==='dgc-countdown-fill')[0].props.style.backgroundColor,'#f59e0b');
+  t.fireExpiry();
+  assert.equal(readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-feedback').length,0);
+  t.unmount(pill);
 });
