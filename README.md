@@ -84,7 +84,7 @@ take precedence in conflicts.
 
 The selected LLM provider/model comes from `ctx.llm.listProviders()` / `listModels()` and is invoked directly via `ctx.llm.stream()`; it does **not** create another agent, require separate API keys, or edit the main Agent's chosen model.
 
-Reasoning effort is deliberately **not** a UI setting: `ctx.llm.resolveModelInfo()` returns adapter-owned ordered effort IDs, from which the plugin selects `off`/`none` if advertised, otherwise the lowest available level. If no reasoning metadata is exposed, the provider default is used.
+Reasoning effort is deliberately **not** a UI setting: `ctx.llm.resolveModelInfo()` supplies adapter-owned ordered effort IDs. The optional large-file **classification** request uses the lowest available *non-Off* effort, falling back to Off only if it is the sole supported level. The final **commit-message generation** request prefers Off and falls back to the lowest supported effort. If no reasoning metadata is exposed, the provider default applies.
 
 Global Token display and countdown color also persist alongside existing instructions; old v1 files missing these keys use the documented defaults without migration. Color inputs are validated as six-digit hexadecimal CSS colors.
 
@@ -92,14 +92,48 @@ Settings are stored atomically in `$DSH_HOME/dsh-git-commit.json` (or `~/.dsh/ds
 
 ## Large diff and LLM context
 
-The commit generator supplies an inventory of **all changed files**, added/deleted line totals, recent commit subjects *for style only*, and the staged patch. It never sends the entire Agent conversation or tool history. The patch is treated as untrusted data. Secrets are redacted best-effort using the existing `@mcarvin/smart-diff` helper (not guaranteed exhaustive; use trusted providers and avoid staging credentials).
+The generator uses a prepared, immutable Git index snapshot for both LLM context
+and the eventual commit. **Neither the file-selection decision nor secret masking
+changes the actual staged content.** The model receives the complete changed-file
+inventory with per-file +/- counts, the commit scope, the aggregate line totals,
+and up to five recent commit subjects *for writing style only*. It never receives
+an entire Agent conversation.
 
-* **Small changes (up to 18,000 characters of patch):** one call to DSH LLM. Configured global/repository instructions govern subject and body formatting.
-* **Large changes:** reuses `@mcarvin/smart-diff`'s exported `splitUnifiedDiffIntoFileChunks` and `groupDiffChunksByBudget`. Large single-file patches are further divided into bounded line sections. Map calls extract verifiable change facts (concurrency 2), then one reduce call combines them with the complete file inventory into **one commit message**.
-* **Pathological inputs:** the number of semantic map calls is bounded at 24; when this cap is reached, the final message receives a warning that only the covered chunks were semantically inspected. It does not falsely claim whole-patch inspection. A 64 MiB raw Git diff overflow uses bounded per-file samples rather than an arbitrary prefix of the whole patch.
-* Other Git status data, including binary files and full-file coverage, is preserved in the metadata supplied to the final generation (path inventory is bounded to 24,000 characters to prevent context overflow).
+* **No single file exceeds 2,000 changed lines** (added + deleted lines from Git patch hunks):
+  send **one** DSH LLM request with all file patches and generate the commit message.
+  The limit is per file, **not** a maximum on the whole Diff or the source-file length.
+* **At least one file exceeds 2,000 changed lines:** send **one** preliminary
+  classification request containing the paths and change statistics of **every**
+  changed file, plus **the first 200 Git patch lines** for each over-threshold file.
+  The preliminary request does not receive the contents of smaller files. It must
+  return JSON decisions identifying which large files require a complete patch.
+  Unknown, malformed, missing, or conflicting decisions default to **full read**.
+* **Generate with one final request:** include full patches for all smaller files
+  and large files marked full-read. For large files marked preview-only, retain
+  the first 200 patch lines plus a conspicuous `TRUNCATED GIT PATCH PREVIEW`
+  annotation stating that the rest was **not inspected**. All paths remain in the
+  inventory even when a patch is shortened; no file is silently omitted.
+* **At most two model calls**, both through the configured DSH provider/model.
+  Classification uses the lowest non-Off reasoning effort when available;
+  generation uses Off when available, otherwise the lowest supported effort.
+  The previous 18,000-character Map-Reduce loop and 24-map-call limit are gone.
+* **Hard safety limits:** source snapshots whose 64 MiB Git capture limit was
+  exceeded cannot produce a trustworthy full-file inventory and are rejected
+  before requesting a message. Prepared prompts above the local single-call
+  character safety budget also fail clearly: the plugin does not send an
+  unannounced partial patch or silently start additional LLM retries. The
+  provider's actual tokenizer and model context window remain authoritative.
+* **Redaction:** `@visulima/redact` 5.0.0's free-text `stringAnonymize` API with
+  `credentialRules` and a small extra rule for credential assignments masks
+  known secret patterns in **both** LLM requests (including paths and global
+  instructions). It deliberately does not use the aggressive PII/date rules.
+  This is best-effort, **not a guarantee against credential disclosure**; avoid
+  committing secrets and use trusted model providers.
 
-This is a deliberate light-weight commit summarizer, **not a code-review agent**. It will fail rather than guess a commit message if no DSH model is configured, and it deliberately does not allow model-side tool execution.
+The caller-supplied commit-message path skips all model calls. Normal generated
+commits record token metrics for one or two calls, preserving the existing
+cross-plugin API. This is a lightweight Commit Message generator, not a
+code-review agent, and it never runs model-suggested commands.
 
 ## Install into DSH
 
@@ -170,7 +204,7 @@ transport is owned by DSH Connection, and the plugin registers an exact route
 through `connection.fetch.register()`. It does not require or access the
 `webServer` service directly.
 
-The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6.4.0` dependency. It uses the DSH Host's existing `connection`, `llm`, `slots`, and `sidebarRight` services; the right-side UI requires the standard DSH Web/Desktop shell.
+The plugin targets Node.js **22.22.1+** and uses the direct `@visulima/redact@5.0.0` dependency for model-bound text masking. It uses the DSH Host's existing `connection`, `llm`, `slots`, and `sidebarRight` services; the right-side UI requires the standard DSH Web/Desktop shell.
 
 > **Security:** UI requests use **`ctx.connection.fetch.register({ path: '/api/git-commit', ... })`**, reusing the authenticated DSH `/api` carrier and its Owner/Host/Origin checks. The browser uses the standard `ctx.connection.rpc.call('/api', 'git-commit', ...)` request envelope. Importantly, this avoids `ctx.connection.rpc.handle()` creating a new channel, which reads `webServer` from the Connection service's *own* injection scope and caused plugin activation to fail. A bare `ctx.webServer.register()` would bypass authentication and is not used.
 
@@ -179,7 +213,7 @@ The package requires Node.js **22.22.1+** to satisfy its `@mcarvin/smart-diff@^6
 Use Plugins → **Uninstall** (not only the enable toggle) and install the Git URL again.
 DSH's package manager can retain the previous Git checkout when it already
 matches the installed spec; explicitly remove the installed package first.
-Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.8**.
+Enable the new bundle and fully quit/reopen Desktop. Verify version **0.1.9**.
 
 Earlier versions had two separate startup/UI issues: v0.1.1 registered RPC
 through the Connection provider's shadow context and incorrectly accessed
@@ -231,7 +265,7 @@ Result example (the values are illustrative):
 }
 ```
 
-**LLM statistics:** a direct `ctx.llm.stream()` emits a provider-reported `usage` chunk (some routes omit counters) and model text/reasoning deltas. The plugin uses `BlockAssembler.usage` plus local monotonic timestamps; no separate model request is needed. Total input = uncached `inputTokens` + `cacheReadTokens` + `cacheWriteTokens`. Reasoning output is **already included** in output tokens. For a large Diff, the plugin sums Token usage over all Map/Reduce calls. Latency is the wall-clock delay from the first model request to the **earliest content token**; output speed is total emitted completion tokens divided by the sum of each call's decoding time, which avoids overstating throughput when Map calls overlap. `llm.durationMs` measures LLM phase wall time; `totalDurationMs` includes Git preparation and committing. Usage remains `null` if any contributing request lacks an authoritative provider usage event. The `llm` field is omitted entirely when a caller supplies the message and no model is invoked.
+**LLM statistics:** a direct `ctx.llm.stream()` emits a provider-reported `usage` chunk (some routes omit counters) and model text/reasoning deltas. The plugin uses `BlockAssembler.usage` plus local monotonic timestamps; no separate model request is needed. Total input = uncached `inputTokens` + `cacheReadTokens` + `cacheWriteTokens`. Reasoning output is **already included** in output tokens. For a large Diff, the plugin sums Token usage over its classification and generation calls. Latency is the wall-clock delay from the first model request to the **earliest content token**; output speed is total emitted completion tokens divided by the sum of each call's decoding time, which avoids overstating throughput if the adapter streams overlap. `llm.durationMs` measures LLM phase wall time; `totalDurationMs` includes Git preparation and committing. Usage remains `null` if any contributing request lacks an authoritative provider usage event. The `llm` field is omitted entirely when a caller supplies the message and no model is invoked.
 
 A failure returns `{ success:false, status:'failure', scope, additions:0, deletions:0, message:'', hash:null, error:'...' }` and **never invents a commit hash**. `commit({cwd, message:'...'})` is supported when another plugin already has a prepared commit message; it still follows the exact same staged/all semantics and snapshot safeguards. `status({cwd})`, `changeToken({cwd})`, `settings({cwd})`, `saveSettings({cwd,patch})` and `models()` are also available. See [`lib/index.d.ts`](lib/index.d.ts).
 
@@ -244,7 +278,7 @@ npm test
 npm run check
 ```
 
-Tests use temporary *real Git repositories* for staged-only vs all-files commits, untracked files, worktree changes during generation, accurate return values, settings persistence, reasoning metadata, and oversized diff batching. The Client test executes the published `window.__ModuleLoader__` factory with simulated browser and React hooks. It verifies Git/non-Git floating panels, collapse/expand control, icon-only buttons, setting ordering and persistence, the two-line success confirmation, three requested font treatments, ten-second auto-dismiss, live countdown color changes, optional Token details, field-level saves/failures, and supported-client-package manifest. Host tests cover TokenUsage aggregation across concurrent model requests and retaining the existing cross-plugin return contract. A real temporary non-Git directory test checks global-only persistence and recognition of a later `git init`. No provider key is required. An actual Desktop host/browser integration test and a live LLM call are still needed.
+Tests use temporary *real Git repositories* for staged-only vs all-files commits, untracked files, worktree changes during generation, accurate return values, settings persistence, reasoning metadata, and two-call large-file Diff selection. The Client test executes the published `window.__ModuleLoader__` factory with simulated browser and React hooks. It verifies Git/non-Git floating panels, collapse/expand control, icon-only buttons, setting ordering and persistence, the two-line success confirmation, three requested font treatments, ten-second auto-dismiss, live countdown color changes, optional Token details, field-level saves/failures, and supported-client-package manifest. Host tests cover TokenUsage aggregation across concurrent model requests and retaining the existing cross-plugin return contract. A real temporary non-Git directory test checks global-only persistence and recognition of a later `git init`. No provider key is required. An actual Desktop host/browser integration test and a live LLM call are still needed.
 
 ## Reference implementations and licensing
 
@@ -254,9 +288,9 @@ This project is independently implemented on DSH's public APIs. Reference projec
 |---|---|---|
 | [luigiinred/dsh-git-status-pill](https://github.com/luigiinred/dsh-git-status-pill) | MIT | Floating `shell.overlay` surface and session-aware branch/line-status UX |
 | [dennisrongo/dsh-plugins: dsh-git](https://github.com/dennisrongo/dsh-plugins/tree/main/plugins/dsh-git) | MIT | DSH native LLM service calls, staged-diff commit model, watcher/token concept |
-| [mcarvin8/smart-diff](https://github.com/mcarvin8/smart-diff) | MIT | **Direct installed npm dependency** for public diff chunking and secret-redaction functions |
-| [MantisWare/commit-ai](https://github.com/MantisWare/commit-ai) | MIT | Design reference for map/reduce, bounded concurrency and huge-file handling |
+| [visulima/redact](https://github.com/visulima/visulima/tree/main/packages/data-manipulation/redact) | MIT | **Direct installed npm dependency** for credential-pattern masking in LLM-bound Diff text |
+| [MantisWare/commit-ai](https://github.com/MantisWare/commit-ai) | MIT | Historical design reference for large-file Diff summarization |
 | [SunParis/GitCommitGenerator](https://github.com/SunParis/GitCommitGenerator) | MIT | Design reference for eliminating unhelpful generated/binary diff bodies |
 | [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) | See upstream | Canonical Cordis services, Connection RPC, LLM metadata, right sidebar and client slots |
 
-Implementation code here is new rather than a wholesale fork of any referenced repository. The package's own code is MIT-licensed. The direct smart-diff npm dependency retains its upstream MIT license and copyright; third-party notices and upstream references are recorded in [THIRD_PARTY.md](THIRD_PARTY.md). No AGPL implementation code or font assets are included.
+Implementation code here is new rather than a wholesale fork of any referenced repository. The package's own code is MIT-licensed. The direct `@visulima/redact` dependency retains its upstream MIT license and copyright; third-party notices and upstream references are recorded in [THIRD_PARTY.md](THIRD_PARTY.md). No AGPL implementation code or font assets are included.

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { git, repoRoot, visibleStatus, plannedMode, preparedSnapshot, commitPrepared, parseNumstat } from '../lib/core/git.js';
 import { GitCommitService } from '../lib/core/service.js';
 import { InstructionStore } from '../lib/core/store.js';
-import { reasoningSelection, activeInstructions, makeBatches, cleanMessage } from '../lib/core/message.js';
+import { reasoningSelection, activeInstructions, cleanMessage, splitFileDiffs, previewFileDiff, parseReadDecisions, generateMessage } from '../lib/core/message.js';
 import { summarizeLlmCalls } from '../lib/core/metrics.js';
 
 async function fixture(fn) {
@@ -95,22 +95,36 @@ test('settings inheritance, model selection, and deterministic reasoning',async(
   assert.equal(reasoningSelection({reasoning:{efforts:[{id:'off'},{id:'low'},{id:'high'}]}}),'off');
   assert.equal(reasoningSelection({reasoning:{efforts:[{id:'low'},{id:'high'}]}}),'low');
   assert.equal(reasoningSelection({} ),undefined);
+  // Classifier uses lowest non-Off level, unless Off is the only level.
+  const offLowHigh={reasoning:{efforts:[{id:'off'},{id:'low'},{id:'medium'},{id:'high'}]}};
+  assert.equal(reasoningSelection(offLowHigh,'decide'),'low');
+  assert.equal(reasoningSelection(offLowHigh,'generate'),'off');
+  assert.equal(reasoningSelection({reasoning:{efforts:[{id:'off'}]}},'decide'),'off');
+  assert.equal(reasoningSelection({reasoning:{efforts:[{id:'medium'},{id:'high'}]}},'decide'),'medium');
+  assert.equal(reasoningSelection({reasoning:{efforts:[{id:'medium'},{id:'high'}]}},'generate'),'medium');
+  assert.equal(reasoningSelection({},'decide'),undefined);
   const settings={globalInstruction:'G',repositoryInstruction:'R',inheritGlobal:true};
   assert.match(activeInstructions(settings),/GLOBAL/);
   assert.doesNotMatch(activeInstructions({...settings,inheritGlobal:false}),/GLOBAL/);
   assert.equal(cleanMessage('```text\nfeat: update\n```'),'feat: update');
 });
 
-test('file chunks are grouped without dropping trailing files, oversized sections get split',()=>{
-  const split = diff => diff.split(/(?=diff --git )/).filter(Boolean);
-  const group = (chunks, max) => { const batches=[];let acc='';for(const part of chunks){if(acc&&acc.length+part.length>max){batches.push(acc);acc='';}acc+=part;}if(acc)batches.push(acc);return batches;};
-  const utils={splitUnifiedDiffIntoFileChunks:split,groupDiffChunksByBudget:group};
-  const diff='diff --git a/a b/a\n' + Array.from({length:50}, (_,i)=>`+${i} change\n`).join('') + 'diff --git a/z b/z\n+last line\n';
-  const batches=makeBatches(diff,130,utils);
-  assert.ok(batches.length>2);
-  assert.ok(batches.some(s=>s.includes('last line')));
-  assert.ok(batches.every(s=>s.length<=180));
-});
+test('per-file patches preserve Git inventory, unicode paths and renames',async()=>fixture(async root=>{
+  const unusual='my file 测试.txt';
+  await writeFile(join(root,unusual),'one\ntwo unicode marker\n');
+  await git(root,['mv','a.txt','renamed a.txt']);
+  await git(root,['add','-A']);
+  const snapshot=await preparedSnapshot(root,'staged');
+  const chunks=splitFileDiffs(snapshot);
+  assert.equal(chunks.length,snapshot.paths.length);
+  assert.deepEqual(chunks.map(x=>x.path),snapshot.paths);
+  const unicode=chunks.find(x=>x.path===unusual);
+  assert.match(unicode.diff,/two unicode marker/);
+  assert.equal(unicode.changedLines,2);
+  assert.ok(chunks.some(x=>x.path==='renamed a.txt'));
+  assert.deepEqual(parseReadDecisions('invalid',chunks),new Set(chunks.map(x=>x.id)));
+  assert.equal(previewFileDiff(unicode,2).split('\n').filter(Boolean).length,2);
+}));
 
 test('numstat parser handles renames and binary changes',()=>{
   assert.deepEqual(parseNumstat(['12\t3\tsrc/a.ts', '-\t-\timg.png', '3\t1\t', 'a', 'b', ''].join('\0')),{additions:15,deletions:4,binary:1});
@@ -185,7 +199,7 @@ test('Automatic non-Git hide is an independent global boolean persisted across r
 });
 
 
-test('TokenUsage aggregation counts cache writes once and computes true decode speed across overlapping Map calls',()=>{
+test('TokenUsage aggregation counts cache writes once and computes true decode speed across overlapping model calls',()=>{
   const usage=summarizeLlmCalls([
     {startedAt:0,firstTokenAt:100,endedAt:1100,
       usage:{inputTokens:100,outputTokens:200,cacheReadTokens:10,cacheWriteTokens:20,reasoningTokens:5}},
@@ -269,5 +283,153 @@ test('direct AI calls aggregate metrics in existing programmatic commit response
     const manual=await service.commit({cwd:root,message:'test: caller supplied'});
     assert.equal(manual.success,true);
     assert.equal(Object.hasOwn(manual,'llm'),false,'no LLM calls means no fabricated TokenUsage');
+  } finally {service.close();}
+}));
+
+const tinySettings={globalInstruction:'',repositoryInstruction:'',inheritGlobal:true};
+const hugeData=Array.from({length:2300},(_,i)=>`line-${i} GENERATED_SNAPSHOT_CONTENT_${i}`).join('\n')+'\n';
+
+async function largeSnapshotFixture(fn) {
+  return fixture(async root=>{
+    await mkdir(join(root,'drizzle','meta'),{recursive:true});
+    await mkdir(join(root,'drizzle','migrations'),{recursive:true});
+    await writeFile(join(root,'drizzle','meta','0000_snapshot.json'), hugeData);
+    await writeFile(join(root,'drizzle','migrations','0001_schema.sql'),
+      'ALTER TABLE users ADD COLUMN avatar_url text;\n');
+    await git(root,['add','-A']);
+    const snapshot=await preparedSnapshot(root,'staged');
+    return fn(root,snapshot);
+  });
+}
+
+test('large snapshot + migration sends 1 classifier and 1 generator; rejected full read keeps 200-line preview',async()=>largeSnapshotFixture(async(_root,snapshot)=>{
+  const phases=[];
+  const result=await generateMessage(snapshot,tinySettings,async call=>{
+    phases.push(call);
+    if(call.purpose==='classify') return JSON.stringify({decisions:[{id:2,readFullDiff:false}]});
+    return 'feat(db): add user avatar column';
+  },{redact:text=>text,contextWindow:1_000_000,decisionReasoningEffort:'low',generationReasoningEffort:'off'});
+  // The large snapshot position depends on Git file sorting. Classifier output
+  // above may default to full if its id is not 2; the test also checks it.
+  const big=splitFileDiffs(snapshot).find(file=>file.changedLines>2000);
+  assert.ok(big);
+  assert.equal(phases.length,2);
+  assert.equal(phases[0].purpose,'classify');
+  assert.equal(phases[0].reasoningEffort,'low');
+  assert.equal(phases[1].purpose,'generate');
+  assert.equal(phases[1].reasoningEffort,'off');
+  assert.equal(result,'feat(db): add user avatar column');
+  assert.match(phases[0].prompt,/0000_snapshot\.json/);
+  assert.match(phases[0].prompt,/0001_schema\.sql/);
+  assert.doesNotMatch(phases[0].prompt,/ALTER TABLE users/,'classifier sees paths, not the small migration content');
+  const included=big.id===2;
+  if(included){
+    assert.match(phases[1].prompt,/TRUNCATED GIT PATCH PREVIEW/);
+    assert.match(phases[1].prompt,/remainder was NOT read/);
+    assert.doesNotMatch(phases[1].prompt,/GENERATED_SNAPSHOT_CONTENT_2299/);
+  }
+  assert.match(phases[1].prompt,/ALTER TABLE users ADD COLUMN avatar_url text/);
+}));
+
+test('classifier decisions use actual per-file IDs; full read includes tail, skip truncates exactly at 200 lines',async()=>largeSnapshotFixture(async(_root,snapshot)=>{
+  const big=splitFileDiffs(snapshot).find(file=>file.changedLines>2000);
+  assert.ok(big);
+  for(const full of [false,true]){
+    const calls=[];
+    await generateMessage(snapshot,tinySettings,async args=>{
+      calls.push(args);
+      return args.purpose==='classify'
+        ? JSON.stringify({decisions:[{id:big.id,readFullDiff:full}]})
+        : 'feat(db): migrate schema';
+    },{redact:text=>text,contextWindow:1_000_000});
+    assert.equal(calls.length,2);
+    const generated=calls[1].prompt;
+    assert.equal(generated.includes('GENERATED_SNAPSHOT_CONTENT_2299'),full);
+    if(!full){
+      assert.match(generated,/TRUNCATED GIT PATCH PREVIEW/);
+      const preview=previewFileDiff(big);
+      assert.equal(preview.split('\n').filter(Boolean).length,200);
+      assert.ok(generated.includes(preview));
+    }else assert.match(generated,/FULL GIT PATCH/);
+  }
+}));
+
+test('small changes always take one request, even with many files, and include full patches',async()=>fixture(async root=>{
+  await writeFile(join(root,'a.txt'),'one\ntiny change\n');
+  await git(root,['add','a.txt']);
+  const snapshot=await preparedSnapshot(root,'staged');
+  const calls=[];
+  const result=await generateMessage(snapshot,tinySettings,async arg=>{
+    calls.push(arg); return 'fix: small change';
+  },{redact:text=>text,contextWindow:32768});
+  assert.equal(result,'fix: small change');
+  assert.equal(calls.length,1);
+  assert.equal(calls[0].purpose,'generate');
+  assert.match(calls[0].prompt,/tiny change/);
+}));
+
+test('missing, duplicated and invalid classifier IDs default to reading full patch',()=>{
+  const files=[{id:1},{id:2}];
+  assert.deepEqual(parseReadDecisions('{"decisions":[{"id":1,"readFullDiff":false}]}',files),new Set([2]));
+  assert.deepEqual(parseReadDecisions('{"decisions":[{"id":1,"readFullDiff":false},{"id":1,"readFullDiff":false}]}',files),new Set([1,2]));
+  assert.deepEqual(parseReadDecisions('{"decisions":[{"id":1,"readFullDiff":"no"}]}',files),new Set([1,2]));
+  assert.deepEqual(parseReadDecisions('not JSON',files),new Set([1,2]));
+});
+
+test('redaction is applied before both LLM calls to paths, diff, and user instructions',async()=>largeSnapshotFixture(async(_root,snapshot)=>{
+  const calls=[];
+  const secret='AKIAABCDEFGHIJKLMNOP';
+  const userSettings={globalInstruction:`Use ${secret} token`,repositoryInstruction:'',inheritGlobal:true};
+  const redact=text=>text.replaceAll(secret,'<REDACTED>');
+  await generateMessage(snapshot,userSettings,async arg=>{
+    calls.push(arg);
+    return arg.purpose==='classify' ? 'not JSON' : 'chore: update schema metadata';
+  },{redact,contextWindow:1_000_000});
+  assert.equal(calls.length,2);
+  for(const call of calls){
+    assert.doesNotMatch(call.prompt,new RegExp(secret));
+  }
+  assert.doesNotMatch(calls[1].system,new RegExp(secret));
+  assert.match(calls[1].system,/<REDACTED>/);
+}));
+
+test('snapshot budget and capture failures never silently discard Diff or trigger more requests',async()=>largeSnapshotFixture(async(_root,snapshot)=>{
+  let calls=0;
+  await assert.rejects(generateMessage(snapshot,tinySettings,async arg=>{
+    calls++;
+    return arg.purpose==='classify' ? '{"decisions":[]}' : 'chore: snapshot';
+  },{redact:text=>text,contextWindow:3000}),/single-call safety budget/);
+  assert.equal(calls,0);
+  await assert.rejects(generateMessage({...snapshot,clipped:true},tinySettings,async()=>{
+    calls++;return 'chore: update';
+  },{redact:text=>text}),/incomplete file coverage/);
+  assert.equal(calls,0);
+}));
+
+test('production service propagates distinct classification/generation efforts and commits at most twice',async()=>largeSnapshotFixture(async(root,_snapshot)=>{
+  const calls=[];
+  const llm={listProviders:()=>[{id:'mock',name:'Mock'}],listModels:async()=>[{id:'model',name:'Model'}],
+    resolveModelInfo:async()=>({reasoning:{efforts:[{id:'off'},{id:'low'},{id:'high'}]},context:{contextWindow:1_000_000}})};
+  const service=new GitCommitService({...ctx,llm},{
+    store:new InstructionStore(join(root,'.git','settings-test.json')),
+    generator:(snapshot,settings,call,options)=>generateMessage(snapshot,settings,call,{...options,redact:text=>text}),
+    callModel:async arg=>{
+      calls.push(arg);
+      const big=splitFileDiffs(await preparedSnapshot(root,'staged')).find(f=>f.changedLines>2000);
+      return {text:arg.purpose==='classify'
+        ? JSON.stringify({decisions:[{id:big.id,readFullDiff:false}]})
+        : 'feat(db): add avatar URL',
+      usage:{inputTokens:40,outputTokens:20,cacheReadTokens:10},firstTokenMs:1};
+    },
+  });
+  try {
+    const result=await service.commit({cwd:root});
+    assert.equal(result.success,true,result.error);
+    assert.equal(result.llm.calls,2);
+    assert.equal(calls.length,2);
+    assert.deepEqual(calls.map(call=>call.selection.reasoningEffort),['low','off']);
+    assert.equal(result.llm.inputTokens,100);
+    assert.equal(result.llm.outputTokens,40);
+    assert.equal(result.message,'feat(db): add avatar URL');
   } finally {service.close();}
 }));

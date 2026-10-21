@@ -8,7 +8,7 @@ export interface GitCommitRequest {
   message?: string;
   signal?: AbortSignal;
 }
-/** Provider usage totals and local monotonic timings across all Map/Reduce LLM calls. */
+/** Provider usage totals and local monotonic timings across at most two LLM calls. */
 export interface GitCommitLlmMetrics {
   calls: number;
   /** Total input including uncached, cache-read, and cache-write tokens. Null if usage unavailable. */
@@ -19,7 +19,7 @@ export interface GitCommitLlmMetrics {
   reasoningTokens: number | null;
   /** Earliest content token across calls, relative to first request's start. */
   latencyMs: number | null;
-  /** LLM phase elapsed wall-clock time; includes overlapping Map calls only once. */
+  /** LLM phase elapsed wall-clock time. */
   durationMs: number;
   /** Total output tokens / sum of per-call decoding times. Null if data incomplete. */
   outputSpeedTps: number | null;
