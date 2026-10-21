@@ -1,0 +1,4 @@
+# Activated when dsh-git-commit is included in the profile bundle list.
+- insert:
+    - id: dsh-git-commit
+      name: dsh-git-commit
