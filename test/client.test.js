@@ -39,14 +39,14 @@ function readVirtualDom(node, predicate, found = []) {
 }
 
 /** Minimal hook scheduler runs the published browser bundle (including effects). */
-function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', initialPosition = null, simulateDom = false } = {}) {
+function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', initialPosition = null, simulateDom = false, initialGlobalModel = null, initialRepositoryModel = null, dshDefaultModel = null, catalogModels = [{provider:'mock',model:'m',providerName:'Mock',name:'M'}, {provider:'mock',model:'alt',providerName:'Mock',name:'Alt'}] } = {}) {
   const sessions = { ids: ['one', 'two'], byId: {
     one: { id: 'one', cwd: '/example/repo-one' },
     two: { id: 'two', cwd: '/example/plain-directory' },
   }};
   const selected = { value: initial, subscribe: () => () => {}, getSnapshot() { return selected.value; } };
-  const saved = { globalInstruction: 'Global', model: null, autoHideNonGit: initialHide, showTokenDetails: initialShowTokens, countdownColor: initialColor, floatingPosition:initialPosition };
-  const repoConfig = { repositoryInstruction: 'Repository', inheritGlobal: true };
+  const saved = { globalInstruction: 'Global', model: initialGlobalModel, autoHideNonGit: initialHide, showTokenDetails: initialShowTokens, countdownColor: initialColor, floatingPosition:initialPosition };
+  const repoConfig = { repositoryInstruction: 'Repository', inheritGlobal: true, repositoryModel: initialRepositoryModel };
   const calls = [];
   let activeScope;
   const React = {
@@ -117,13 +117,18 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
         : {isRepository:false,root:null};
       else if(method==='settings')value=payload.cwd.includes('repo-one')
         ? {...saved,...repoConfig,isRepository:true,root:'/example/repo-one'}
-        : {...saved,repositoryInstruction:'',inheritGlobal:true,isRepository:false,root:null};
-      else if(method==='models')value={models:[{provider:'mock',model:'m',providerName:'Mock',name:'M'}],defaultModel:null};
+        : {...saved,repositoryInstruction:'',inheritGlobal:true,repositoryModel:null,isRepository:false,root:null};
+      else if(method==='models')value={models:catalogModels,defaultModel:dshDefaultModel};
       else if(method==='saveSettings'){
         if(failSave)throw new Error('Permission denied');
-        Object.assign(saved,payload.patch);
-        if(payload.cwd.includes('repo-one'))Object.assign(repoConfig,payload.patch);
-        value={...saved,...repoConfig,isRepository:payload.cwd.includes('repo-one')};
+        for(const [key,val] of Object.entries(payload.patch)) {
+          if(['repositoryInstruction','inheritGlobal','repositoryModel'].includes(key)) {
+            if(payload.cwd.includes('repo-one'))repoConfig[key]=val;
+          }else saved[key]=val;
+        }
+        value=payload.cwd.includes('repo-one')
+          ? {...saved,...repoConfig,isRepository:true,root:'/example/repo-one'}
+          : {...saved,repositoryInstruction:'',inheritGlobal:true,repositoryModel:null,isRepository:false,root:null};
       }else if(method==='commit')value={
         success:true,scope:'all',hash:'e9f98bd',additions:268,deletions:141,
         message:'feat(ui): show a commit summary\n\nBody: intentionally hidden in the overlay',
@@ -179,6 +184,13 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
 
 const matchButton = (name) => node=>node.type==='button' && node.props['aria-label']===name;
 const textOf = node=> typeof node === 'string' ? node : Array.isArray(node) ? node.map(textOf).join(' ') : (node?.children??[]).map(textOf).join(' ');
+const switchTab = (render,scope,name) => {
+  const tab=readVirtualDom(render(scope),matchButton(name))[0];
+  assert.equal(tab?.props?.role,'tab',`missing ${name} tab`);
+  tab.props.onClick();
+  return render(scope);
+};
+const namedSelect = (dom,name) => readVirtualDom(dom,node=>node.type==='select' && node.props['aria-label']===name)[0];
 
 test('initial empty Session does not crash the global overlay; navigating to a repository activates it',async()=>{
   // In DSH the root shell mounts before a Session is selected. Previously,
@@ -236,68 +248,155 @@ test('Client manifest, visible Git panel, collapse and reopen use icon-only cont
   t.unmount(p);
 });
 
-test('Non-Git panel has only neutral text; accidentally opened settings are global-only',async()=>{
+test('Non-Git workspaces open the Global tab and allow global changes without showing repository fields',async()=>{
   const t=clientHarness({initial:'two'});
   const p=t.mount('shell.overlay');
-  t.render(p);
-  await t.settle();
+  t.render(p);await t.settle();
   const dom=t.render(p);
   assert.equal(readVirtualDom(dom,n=>n.props?.className==='dgc-no-repo').length,1);
   assert.match(textOf(dom),/Not a git repository/);
   assert.deepEqual(readVirtualDom(dom,n=>n.type==='button').map(n=>n.props['aria-label']),['Collapse Git commit']);
-  assert.equal(readVirtualDom(dom,n=>n.props?.className==='dgc-error').length,0);
-  const tab=t.mount('sidebar.right.pane.tab');
-  t.render(tab);
-  await t.settle();
+  const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
+  t.render(tab); // the repository-less effect selects Global
   const page=t.render(tab);
+  assert.equal(readVirtualDom(page,matchButton('Global'))[0].props['aria-selected'],true);
   const fields=readVirtualDom(page,n=>n.type==='label').map(textOf);
   assert.match(fields.join('|'),/Global commit instruction.*Model/s);
   assert.doesNotMatch(fields.join('|'),/Repository commit instruction|Inherit global instruction/);
-  assert.equal(readVirtualDom(page,n=>n.type==='hr').length,3);
   assert.equal(readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox').length,2);
-  assert.match(textOf(page),/Not a git repository/);
-  assert.deepEqual(readVirtualDom(page,n=>n.type==='button').map(x=>x.props['aria-label']),['Reset floating window position']);
+  assert.deepEqual(readVirtualDom(page,n=>n.type==='button').map(x=>x.props['aria-label']),
+    ['Repository','Global','Reset floating window position']);
   const global=readVirtualDom(page,n=>n.type==='textarea')[0];
   global.props.onChange({target:{value:'Updated global'}});
-  global.props.onBlur();
-  await t.settle();
+  global.props.onBlur();await t.settle();
   assert.equal(t.saved.globalInstruction,'Updated global');
-  const patches=t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch);
-  assert.deepEqual(JSON.parse(JSON.stringify(patches)),[{globalInstruction:'Updated global'}]);
+  assert.deepEqual(JSON.parse(JSON.stringify(t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch))),
+    [{globalInstruction:'Updated global'}]);
+  const repoPage=switchTab(t.render,tab,'Repository');
+  assert.match(textOf(repoPage),/Not a git repository/);
+  assert.equal(namedSelect(repoPage,'Repository model'),undefined);
   t.unmount(p);t.unmount(tab);
 });
 
-test('Repository settings follow requested order, auto-save partial patches, and only show save failures',async()=>{
+test('Repository and Global tabs show only scoped controls and serialize independent changes',async()=>{
   const t=clientHarness();
   const p=t.mount('shell.overlay');t.render(p);await t.settle();t.render(p);
   const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
   const page=t.render(tab);
-  const tags=readVirtualDom(page,n=>['h3','label','hr','code','button'].includes(n.type)).map(n=>({type:n.type,text:textOf(n)}));
-  assert.deepEqual(tags.map(t=>t.type),['h3','label','label','hr','label','label','code','hr','label','label','label','hr','button']);
-  assert.equal(tags[0].text,'Git commit settings');
-  assert.equal(tags.find(t=>t.type==='code').text,'/example/repo-one');
+  const tabNodes=readVirtualDom(page,n=>n.type==='button'&&n.props.role==='tab');
+  assert.deepEqual(tabNodes.map(textOf),['Repository','Global']);
+  assert.deepEqual(tabNodes.map(x=>x.props['aria-selected']),[true,false]);
+  assert.deepEqual(tabNodes.map(x=>x.props.tabIndex),[0,-1]);
+  assert.ok(namedSelect(page,'Repository model'));
+  assert.equal(namedSelect(page,'Global model'),undefined);
+  assert.equal(readVirtualDom(page,n=>n.type==='code')[0].children[0],'/example/repo-one');
+  assert.doesNotMatch(textOf(page),/Global commit instruction|Show token details|Automatically hide/);
   assert.doesNotMatch(textOf(page),/Saved|Save settings/);
   readVirtualDom(page,n=>n.type==='input' && n.props.type==='checkbox')[0].props.onChange({target:{checked:false}});
   await t.settle();
-  const area=readVirtualDom(page,n=>n.type==='textarea')[1];
+  const area=readVirtualDom(page,n=>n.type==='textarea')[0];
   area.props.onChange({target:{value:'New repo instruction'}});
-  area.props.onBlur();
-  await t.settle();
+  area.props.onBlur();await t.settle();
   assert.equal(t.repoConfig.repositoryInstruction,'New repo instruction');
   assert.equal(t.repoConfig.inheritGlobal,false);
-  const patches=t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch);
-  assert.deepEqual(JSON.parse(JSON.stringify(patches)),[{inheritGlobal:false},{repositoryInstruction:'New repo instruction'}]);
+  const globalPage=switchTab(t.render,tab,'Global');
+  assert.equal(namedSelect(globalPage,'Repository model'),undefined);
+  assert.ok(namedSelect(globalPage,'Global model'));
+  assert.equal(readVirtualDom(globalPage,n=>n.type==='textarea').length,1);
+  assert.equal(readVirtualDom(globalPage,n=>n.type==='input'&&n.props.type==='checkbox').length,2);
+  assert.ok(readVirtualDom(globalPage,matchButton('Reset floating window position'))[0]);
+  assert.doesNotMatch(textOf(globalPage),/Repository commit instruction|Inherit global instruction/);
+  assert.deepEqual(JSON.parse(JSON.stringify(t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch))),
+    [{inheritGlobal:false},{repositoryInstruction:'New repo instruction'}]);
   t.unmount(tab);t.unmount(p);
   const failing=clientHarness({failSave:true});
   const fp=failing.mount('shell.overlay');failing.render(fp);await failing.settle();failing.render(fp);
   const ft=failing.mount('sidebar.right.pane.tab');failing.render(ft);await failing.settle();
-  const fpage=failing.render(ft);
-  const textarea=readVirtualDom(fpage,n=>n.type==='textarea')[0];
+  const textarea=readVirtualDom(failing.render(ft),n=>n.type==='textarea')[0];
   textarea.props.onChange({target:{value:'Failure'}});
-  textarea.props.onBlur();
-  await failing.settle();
+  textarea.props.onBlur();await failing.settle();
   assert.match(textOf(failing.render(ft)),/Failed to save settings: Permission denied/);
   failing.unmount(ft);failing.unmount(fp);
+});
+
+test('switching workspaces while Global tab is active does not dereference an unloaded settings form',async()=>{
+  const t=clientHarness();
+  const p=t.mount('shell.overlay');t.render(p);await t.settle();t.render(p);
+  const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
+  switchTab(t.render,tab,'Global');
+  t.selected.value='two';t.render(p);
+  assert.doesNotThrow(()=>t.render(tab)); // starts loading the new workspace
+  assert.doesNotThrow(()=>t.render(tab)); // Global content must not access null form
+  await t.settle();
+  t.render(tab);
+  const loaded=t.render(tab);
+  assert.equal(readVirtualDom(loaded,matchButton('Global'))[0].props['aria-selected'],true);
+  assert.ok(namedSelect(loaded,'Global model'));
+  assert.match(textOf(switchTab(t.render,tab,'Repository')),/Not a git repository/);
+  t.unmount(tab);t.unmount(p);
+});
+
+test('scope tabs support keyboard focus movement',async()=>{
+  const t=clientHarness();const p=t.mount('shell.overlay');t.render(p);await t.settle();t.render(p);
+  const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
+  const repoButton=readVirtualDom(t.render(tab),matchButton('Repository'))[0];
+  let prevented=false, focused=false;
+  repoButton.props.onKeyDown({key:'ArrowRight',preventDefault(){prevented=true;},
+    currentTarget:{parentElement:{querySelector(){return {focus(){focused=true;}}}}}});
+  assert.equal(prevented,true);assert.equal(focused,true);
+  assert.equal(readVirtualDom(t.render(tab),matchButton('Global'))[0].props['aria-selected'],true);
+  const globalButton=readVirtualDom(t.render(tab),matchButton('Global'))[0];
+  globalButton.props.onKeyDown({key:'Home',preventDefault(){},
+    currentTarget:{parentElement:{querySelector(){return {focus(){}}}}}});
+  assert.equal(readVirtualDom(t.render(tab),matchButton('Repository'))[0].props['aria-selected'],true);
+  t.unmount(tab);t.unmount(p);
+});
+
+test('repository selector inherits live global label with a stable value, and overrides only its own scope', async()=>{
+  const t=clientHarness({initialGlobalModel:{provider:'mock',model:'m'},
+    dshDefaultModel:{provider:'mock',model:'alt'}});
+  const p=t.mount('shell.overlay');t.render(p);await t.settle();t.render(p);
+  const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
+  let page=t.render(tab);
+  let selector=namedSelect(page,'Repository model');
+  assert.equal(selector.props.value,'inherit-global');
+  assert.equal(readVirtualDom(selector,node=>node.type==='option')[0].props.value,'inherit-global');
+  assert.match(textOf(selector),/Inherit Global \(Mock \/ M\)/);
+  selector.props.onChange({target:{value:'mock\talt'}});
+  await t.settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(t.repoConfig.repositoryModel)),{provider:'mock',model:'alt'});
+  assert.deepEqual(t.saved.model,{provider:'mock',model:'m'});
+  page=t.render(tab);
+  assert.equal(namedSelect(page,'Repository model').props.value,'mock\talt');
+  page=switchTab(t.render,tab,'Global');
+  assert.equal(namedSelect(page,'Global model').props.value,'mock\tm');
+  namedSelect(page,'Global model').props.onChange({target:{value:''}});
+  await t.settle();
+  assert.equal(t.saved.model,null);
+  page=switchTab(t.render,tab,'Repository');
+  selector=namedSelect(page,'Repository model');
+  assert.match(textOf(selector),/Inherit Global \(Mock \/ Alt\)/,
+    'label tracks resolved DSH default when the global override is cleared');
+  assert.equal(selector.props.value,'mock\talt','repository override survives global changes');
+  selector.props.onChange({target:{value:'inherit-global'}});
+  await t.settle();
+  assert.equal(t.repoConfig.repositoryModel,null);
+  page=t.render(tab);
+  assert.equal(namedSelect(page,'Repository model').props.value,'inherit-global');
+  assert.match(textOf(namedSelect(page,'Repository model')),/Inherit Global \(Mock \/ Alt\)/);
+  assert.deepEqual(JSON.parse(JSON.stringify(t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch))),[
+    {repositoryModel:{provider:'mock',model:'alt'}},{model:null},{repositoryModel:null},
+  ]);
+  t.unmount(tab);t.unmount(p);
+});
+
+test('repository inheritance label uses first catalog model if no DSH default is exposed',async()=>{
+  const t=clientHarness();
+  const p=t.mount('shell.overlay');t.render(p);await t.settle();t.render(p);
+  const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
+  const page=t.render(tab);
+  assert.match(textOf(namedSelect(page,'Repository model')),/Inherit Global \(Mock \/ M\)/);
+  t.unmount(tab);t.unmount(p);
 });
 
 test('Collapsed Git button drags without expanding, and click preserves upper-right anchor', async () => {
@@ -365,7 +464,7 @@ test('Non-Git panel folds to crossed Git icon, drags and respects automatic hide
 
   // The settings tab can remain open after navigating to a non-Git directory.
   const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
-  const page=t.render(tab);
+  const page=switchTab(t.render,tab,'Global');
   const hide=readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox');
   assert.equal(hide.length,2);
   assert.equal(hide[0].props.checked,false,'new setting defaults to disabled');
@@ -439,7 +538,7 @@ test('settings automatically persist Show token details and Countdown color, syn
   const t=clientHarness();
   const pill=t.mount('shell.overlay');t.render(pill);await t.settle();t.render(pill);
   const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
-  let form=t.render(tab);
+  let form=switchTab(t.render,tab,'Global');
   const tokenLabel=readVirtualDom(form,n=>n.type==='label'&&textOf(n).includes('Show token details'))[0];
   assert.equal(tokenLabel.children[0].props.checked,false);
   tokenLabel.children[0].props.onChange({target:{checked:true}});
@@ -520,7 +619,7 @@ test('saved position hydrates on next mount; resize snaps inside viewport and re
   await t.settle();
   assert.deepEqual(JSON.parse(JSON.stringify(t.saved.floatingPosition)),{right:144,top:84});
   const settings=t.mount('sidebar.right.pane.tab');t.render(settings);await t.settle();
-  const button=readVirtualDom(t.render(settings),matchButton('Reset floating window position'))[0];
+  const button=readVirtualDom(switchTab(t.render,settings,'Global'),matchButton('Reset floating window position'))[0];
   assert.ok(button,'native settings supports a reset position button');
   button.props.onClick();
   await t.settle();

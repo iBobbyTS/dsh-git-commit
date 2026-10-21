@@ -130,17 +130,70 @@ test('numstat parser handles renames and binary changes',()=>{
   assert.deepEqual(parseNumstat(['12\t3\tsrc/a.ts', '-\t-\timg.png', '3\t1\t', 'a', 'b', ''].join('\0')),{additions:15,deletions:4,binary:1});
 });
 
-test('settings persist per-repository inherit toggle and global model',async()=>{
+test('repository model overrides persist independently and inherit global without settings migration',async()=>{
   const base=await mkdtemp(join(tmpdir(),'dgc-cfg-'));
   try {
-    const store=new InstructionStore(join(base,'settings.json'));
-    await store.save('/a',{inheritGlobal:false,repositoryInstruction:'A',globalInstruction:'global',model:{provider:'mock',model:'x'}});
+    const file=join(base,'settings.json');
+    const store=new InstructionStore(file);
+    await store.save('/a',{inheritGlobal:false,repositoryInstruction:'A',globalInstruction:'global',
+      model:{provider:'mock',model:'global'},repositoryModel:{provider:'mock',model:'repo-a'}});
     await store.save('/b',{repositoryInstruction:'B'});
-    assert.equal((await store.get('/a')).inheritGlobal,false);
-    assert.equal((await store.get('/b')).inheritGlobal,true);
-    assert.equal((await store.get('/b')).globalInstruction,'global');
-    assert.deepEqual((await store.get('/b')).model,{provider:'mock',model:'x'});
+    const fresh=new InstructionStore(file);
+    assert.equal((await fresh.get('/a')).inheritGlobal,false);
+    assert.equal((await fresh.get('/b')).inheritGlobal,true);
+    assert.equal((await fresh.get('/b')).globalInstruction,'global');
+    assert.deepEqual((await fresh.get('/b')).model,{provider:'mock',model:'global'});
+    assert.equal((await fresh.get('/b')).repositoryModel,null);
+    assert.deepEqual((await fresh.get('/a')).repositoryModel,{provider:'mock',model:'repo-a'});
+    await store.save(null,{model:{provider:'mock',model:'new-global'}});
+    assert.deepEqual((await fresh.get('/a')).repositoryModel,{provider:'mock',model:'repo-a'},
+      'global model updates cannot overwrite explicit repository selection');
+    assert.deepEqual((await fresh.get('/b')).model,{provider:'mock',model:'new-global'});
+    await store.save('/a',{repositoryModel:null});
+    assert.equal((await fresh.get('/a')).repositoryModel,null);
+    const raw=JSON.parse(await readFile(file,'utf8'));
+    assert.equal(raw.repositories['/a'].model,null);
+    assert.deepEqual(raw.global.model,{provider:'mock',model:'new-global'});
+    await assert.rejects(store.save(null,{repositoryModel:{provider:'mock',model:'bad'}}),/require a Git repository/);
+    await assert.rejects(store.save('/a',{repositoryModel:{provider:'',model:'bad'}}),/Invalid repositoryModel selection/);
+    await assert.rejects(store.save('/a',{repositoryModel:{provider:'mock',model:''}}),/Invalid repositoryModel selection/);
+    assert.equal((await fresh.get('/a')).repositoryModel,null);
+    await writeFile(file,JSON.stringify({version:1,global:{instruction:'legacy',model:{provider:'old',model:'model'}},
+      repositories:{'/a':{instruction:'old repo'}}}));
+    const legacy=await fresh.get('/a');
+    assert.deepEqual(legacy.model,{provider:'old',model:'model'});
+    assert.equal(legacy.repositoryModel,null,'old v1 settings must inherit global');
   } finally {await rm(base,{recursive:true,force:true});}
+});
+
+test('chosen model follows repository override, global override, DSH default and fallback in order', async()=>{
+  const base=await mkdtemp(join(tmpdir(),'dgc-route-'));
+  const store=new InstructionStore(join(base,'settings.json'));
+  const resolved=[];
+  const llm={
+    listProviders:()=>[{id:'mock',name:'Mock'}],
+    listModels:async()=>[{id:'first',name:'First'},{id:'last',name:'Last'}],
+    resolveModelInfo:async(provider,model)=>{resolved.push(`${provider}/${model}`);return {reasoning:{efforts:[{id:'off'}]}};},
+  };
+  let dshDefault={provider:'mock',model:'default'};
+  const service=new GitCommitService({
+    llm,get:()=>({currentSelection:()=>dshDefault}),
+  },{store});
+  try {
+    assert.equal((await service.chosenModel(await store.get('/a'))).model,'default');
+    await store.save(null,{model:{provider:'mock',model:'global'}});
+    assert.equal((await service.chosenModel(await store.get('/a'))).model,'global');
+    await store.save('/a',{repositoryModel:{provider:'mock',model:'specific'}});
+    assert.equal((await service.chosenModel(await store.get('/a'))).model,'specific');
+    assert.equal((await service.chosenModel(await store.get('/b'))).model,'global');
+    await store.save('/a',{repositoryModel:null});
+    assert.equal((await service.chosenModel(await store.get('/a'))).model,'global');
+    await store.save(null,{model:null});
+    assert.equal((await service.chosenModel(await store.get('/a'))).model,'default');
+    dshDefault=null;
+    assert.equal((await service.chosenModel(await store.get('/a'))).model,'first');
+    assert.equal(resolved.at(-1),'mock/first');
+  } finally {service.close();await rm(base,{recursive:true,force:true});}
 });
 
 test('non-Git workspaces expose a neutral status and editable global settings without creating repo entries',async()=>{
@@ -157,7 +210,7 @@ test('non-Git workspaces expose a neutral status and editable global settings wi
     assert.deepEqual(status,{isRepository:false,root:null});
     assert.deepEqual(await service.changeToken({cwd}),{token:null});
     assert.deepEqual(await service.settings({cwd}),{
-      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,autoHideNonGit:false,showTokenDetails:false,countdownColor:'#f59e0b',floatingPosition:null,
+      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,repositoryModel:null,autoHideNonGit:false,showTokenDetails:false,countdownColor:'#f59e0b',floatingPosition:null,
       isRepository:false,root:null,
     });
     const saved=await service.saveSettings({cwd,patch:{globalInstruction:'No scope',model:{provider:'mock',model:'x'}}});
@@ -167,6 +220,7 @@ test('non-Git workspaces expose a neutral status and editable global settings wi
     assert.deepEqual((await service.settings({})).model,{provider:'mock',model:'x'});
     await assert.rejects(service.saveSettings({cwd,patch:{repositoryInstruction:'reject'}}),/require a Git repository/);
     await assert.rejects(service.saveSettings({cwd,patch:{inheritGlobal:false}}),/require a Git repository/);
+    await assert.rejects(service.saveSettings({cwd,patch:{repositoryModel:{provider:'mock',model:'x'}}}),/require a Git repository/);
     const raw=JSON.parse(await readFile(join(base,'settings.json'),'utf8'));
     assert.deepEqual(raw.repositories,{},'non-Git global edits must not create a fake repository');
     await git(cwd,['init','-b','main']);

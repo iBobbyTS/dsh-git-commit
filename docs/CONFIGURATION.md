@@ -2,21 +2,14 @@
 
 `Git commit settings` is rendered in DSH's native right sidebar. The page automatically saves changes; there is no Save button or Saved notice. Save failures are shown.
 
-The fields are ordered as follows:
+The settings page has two tabs at its top:
 
-1. **Global commit instruction** — shared prompt convention for commit-message generation.
-2. **Model** — a configured DSH LLM route, or the DSH default.
-3. Divider.
-4. **Inherit global instruction** — per-repository checkbox, checked by default.
-5. **Repository commit instruction** — scoped to the canonical repository root.
-6. Canonical repository path.
-7. Divider.
-8. **Automatically hide floating window in non-git projects** — global; off by default.
-9. **Show token details** — global; off by default.
-10. **Countdown color** — global color picker, orange `#f59e0b` by default.
-11. Divider, then **Reset floating window position** — restores the lower-right default immediately.
+- **Repository** (default when a Git project is active): **Model** (default **Inherit Global (provider / model)**, or select a repository-specific model), **Inherit global instruction** (checked by default), **Repository commit instruction**, and the canonical Git repository path. The model dropdown's inherit option has the *fixed value* `inherit-global`, even as its label updates when the global model changes. Model inheritance and instruction inheritance are independent. Choosing an explicit model affects only this repository.
+- **Global**: **Global commit instruction**, **Model** (explicit DSH provider/model, or DSH default), **Automatically hide floating window in non-git projects** (off by default), **Show token details** (off by default), **Countdown color** (orange `#f59e0b` by default), and **Reset floating window position** (returns to the lower-right default).
 
-In a non-Git directory, the repository fields are replaced by **Not a git repository**; global fields and the position reset remain accessible if the settings tab is already open.
+In a non-Git directory the Global tab is selected automatically, while Repository displays **Not a git repository** if opened. Global fields and position reset remain available.
+
+Repository models are persisted in each Git root's `repositories[root].model`. A missing model or `null` means **inherit Global**; an existing settings file keeps its previous global `model` value and every repository continues to inherit it until explicitly overridden. The effective provider/model is resolved immediately before each commit as **repository override → global override → DSH default → first configured model**, so this setting affects both large-Diff decisions and final commit generation.
 
 ## Position and layout
 

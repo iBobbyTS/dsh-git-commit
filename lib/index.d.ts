@@ -51,7 +51,10 @@ export interface GitCommitSettings {
   countdownColor: string;
   /** Null means default lower-right anchor. Otherwise saved top/right coordinates in CSS pixels. */
   floatingPosition: {right:number;top:number} | null;
+  /** Global model selection, null means use the DSH default. */
   model: { provider: string; model: string } | null;
+  /** Repository-only override; null means inherit the global model selection (fixed UI option value). */
+  repositoryModel: { provider: string; model: string } | null;
   /** True for a Git working tree; false for global-only settings in ordinary directories. */
   isRepository: boolean;
   /** Canonical Git root, or null outside a repository. */
@@ -67,7 +70,7 @@ export interface GitCommitApi {
   >;
   changeToken(request: GitCommitRequest): Promise<{ token: number | null }>;
   settings(request?: GitCommitRequest): Promise<GitCommitSettings>;
-  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model' | 'autoHideNonGit' | 'showTokenDetails' | 'countdownColor' | 'floatingPosition'>> }): Promise<GitCommitSettings>;
+  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model' | 'repositoryModel' | 'autoHideNonGit' | 'showTokenDetails' | 'countdownColor' | 'floatingPosition'>> }): Promise<GitCommitSettings>;
   models(): Promise<{ models: Array<{provider:string;providerName:string;model:string;name:string}>; defaultModel: {provider:string;model:string}|null }>;
 }
 declare module '@deepseek-ai/cordis' {
