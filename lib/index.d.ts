@@ -49,6 +49,8 @@ export interface GitCommitSettings {
   showTokenDetails: boolean;
   /** Progress bar color in #rrggbb form; defaults to orange (#f59e0b). */
   countdownColor: string;
+  /** Null means default lower-right anchor. Otherwise saved top/right coordinates in CSS pixels. */
+  floatingPosition: {right:number;top:number} | null;
   model: { provider: string; model: string } | null;
   /** True for a Git working tree; false for global-only settings in ordinary directories. */
   isRepository: boolean;
@@ -65,7 +67,7 @@ export interface GitCommitApi {
   >;
   changeToken(request: GitCommitRequest): Promise<{ token: number | null }>;
   settings(request?: GitCommitRequest): Promise<GitCommitSettings>;
-  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model' | 'autoHideNonGit' | 'showTokenDetails' | 'countdownColor'>> }): Promise<GitCommitSettings>;
+  saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model' | 'autoHideNonGit' | 'showTokenDetails' | 'countdownColor' | 'floatingPosition'>> }): Promise<GitCommitSettings>;
   models(): Promise<{ models: Array<{provider:string;providerName:string;model:string;name:string}>; defaultModel: {provider:string;model:string}|null }>;
 }
 declare module '@deepseek-ai/cordis' {

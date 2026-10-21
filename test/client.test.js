@@ -17,7 +17,7 @@ const BUILT_IN_CLIENT_PACKAGES = new Set([
 ]);
 
 test('Client loader declares only real DSH package dependencies', () => {
-  assert.equal(manifest.name, 'dsh-git-commit');
+  assert.equal(manifest.name, '@ibobbyts/dsh-git-commit');
   assert.equal(manifest.dsh.client.platform, 'web');
   assert.equal(manifest.exports['./client'], './lib/client.js');
   assert.deepEqual(new Set(manifest.dsh.client.inject), BUILT_IN_CLIENT_PACKAGES);
@@ -39,13 +39,13 @@ function readVirtualDom(node, predicate, found = []) {
 }
 
 /** Minimal hook scheduler runs the published browser bundle (including effects). */
-function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main' } = {}) {
+function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', initialPosition = null, simulateDom = false } = {}) {
   const sessions = { ids: ['one', 'two'], byId: {
     one: { id: 'one', cwd: '/example/repo-one' },
     two: { id: 'two', cwd: '/example/plain-directory' },
   }};
   const selected = { value: initial, subscribe: () => () => {}, getSnapshot() { return selected.value; } };
-  const saved = { globalInstruction: 'Global', model: null, autoHideNonGit: initialHide, showTokenDetails: initialShowTokens, countdownColor: initialColor };
+  const saved = { globalInstruction: 'Global', model: null, autoHideNonGit: initialHide, showTokenDetails: initialShowTokens, countdownColor: initialColor, floatingPosition:initialPosition };
   const repoConfig = { repositoryInstruction: 'Repository', inheritGlobal: true };
   const calls = [];
   let activeScope;
@@ -72,7 +72,16 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     },
   };
   const registrations = [], definitions = new Map(), tabTypes = new Map(), opened=[], styleTags=[];
-  const window = { __ModuleLoader__: { load: entry => registrations.push(entry) } };
+  const listeners = new Map();
+  let observed=[];
+  const container={clientWidth:800,clientHeight:600,getBoundingClientRect:()=>({left:0,top:0})};
+  const window = {
+    innerWidth:800, innerHeight:600,
+    __ModuleLoader__: { load: entry => registrations.push(entry) },
+    addEventListener(type,cb){if(!listeners.has(type))listeners.set(type,new Set());listeners.get(type).add(cb);},
+    removeEventListener(type,cb){listeners.get(type)?.delete(cb);},
+    ResizeObserver:class {constructor(fn){this.fn=fn;observed.push(this);}observe(){}disconnect(){observed=observed.filter(x=>x!==this);}},
+  };
   const document = {
     createElement: () => ({ dataset: {}, remove() {} }),
     head: { appendChild: item => styleTags.push(item) },
@@ -139,6 +148,17 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     scope.index=0;scope.pending=[];activeScope=scope;
     const dom=scope.component(props);
     activeScope=undefined;
+    if(simulateDom) {
+      const root=readVirtualDom(dom,n=>n.props?.className==='dgc-root')[0];
+      if(root?.props?.ref) {
+        const collapsed=readVirtualDom(dom,n=>n.props?.className?.includes('dgc-card-collapsed')).length>0;
+        const nonGit=readVirtualDom(dom,n=>n.props?.className?.includes('dgc-card-no-repo')).length>0;
+        const width=collapsed?44:nonGit?200:180;
+        const height=collapsed?44:nonGit?46:120;
+        root.props.ref.current={offsetParent:container,offsetWidth:width,offsetHeight:height,
+          offsetTop:root.props.style.top??container.clientHeight-root.props.style.bottom-height};
+      }
+    }
     for(const {idx,callback} of scope.pending){
       scope.hooks[idx].cleanup?.();
       scope.hooks[idx].cleanup=callback();
@@ -148,7 +168,13 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
   function unmount(scope){for(const slot of scope.hooks)if(typeof slot?.cleanup==='function')slot.cleanup();}
   const settle=()=>new Promise(resolve=>setImmediate(resolve));
   const fireExpiry=()=>{const current=[...expiries.values()];expiries.clear();current.forEach(fn=>fn());};
-  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry};
+  const resize=(width,height,rootOffset={})=>{
+    container.clientWidth=width;container.clientHeight=height;
+    window.innerWidth=width;window.innerHeight=height;
+    for(const scope of Array.from(observed)) scope.fn();
+    for(const listener of listeners.get('resize')??[]) listener();
+  };
+  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,resize,container};
 }
 
 const matchButton = (name) => node=>node.type==='button' && node.props['aria-label']===name;
@@ -227,10 +253,10 @@ test('Non-Git panel has only neutral text; accidentally opened settings are glob
   const fields=readVirtualDom(page,n=>n.type==='label').map(textOf);
   assert.match(fields.join('|'),/Global commit instruction.*Model/s);
   assert.doesNotMatch(fields.join('|'),/Repository commit instruction|Inherit global instruction/);
-  assert.equal(readVirtualDom(page,n=>n.type==='hr').length,2);
+  assert.equal(readVirtualDom(page,n=>n.type==='hr').length,3);
   assert.equal(readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox').length,2);
   assert.match(textOf(page),/Not a git repository/);
-  assert.equal(readVirtualDom(page,n=>n.type==='button').length,0);
+  assert.deepEqual(readVirtualDom(page,n=>n.type==='button').map(x=>x.props['aria-label']),['Reset floating window position']);
   const global=readVirtualDom(page,n=>n.type==='textarea')[0];
   global.props.onChange({target:{value:'Updated global'}});
   global.props.onBlur();
@@ -247,7 +273,7 @@ test('Repository settings follow requested order, auto-save partial patches, and
   const tab=t.mount('sidebar.right.pane.tab');t.render(tab);await t.settle();
   const page=t.render(tab);
   const tags=readVirtualDom(page,n=>['h3','label','hr','code','button'].includes(n.type)).map(n=>({type:n.type,text:textOf(n)}));
-  assert.deepEqual(tags.map(t=>t.type),['h3','label','label','hr','label','label','code','hr','label','label','label']);
+  assert.deepEqual(tags.map(t=>t.type),['h3','label','label','hr','label','label','code','hr','label','label','label','hr','button']);
   assert.equal(tags[0].text,'Git commit settings');
   assert.equal(tags.find(t=>t.type==='code').text,'/example/repo-one');
   assert.doesNotMatch(textOf(page),/Saved|Save settings/);
@@ -326,7 +352,7 @@ test('Non-Git panel folds to crossed Git icon, drags and respects automatic hide
   assert.equal(readVirtualDom(compact,n=>n.props?.className==='dgc-git-cross').length,1);
   assert.equal(readVirtualDom(compact,matchButton('Git commit')).length,1);
   const button=readVirtualDom(compact,matchButton('Git commit'))[0];
-  const currentTarget={closest:()=>({offsetTop:246}),setPointerCapture(){},releasePointerCapture(){}};
+  const currentTarget={closest:()=>({offsetTop:246,offsetWidth:44,offsetHeight:44,offsetParent:{clientWidth:800,clientHeight:600,getBoundingClientRect:()=>({left:0,top:0})}}),setPointerCapture(){},releasePointerCapture(){}};
   const mouse={button:0,pointerId:8,clientX:180,clientY:260,currentTarget};
   button.props.onPointerDown(mouse);
   button.props.onPointerMove({...mouse,clientX:210,clientY:235});
@@ -334,7 +360,7 @@ test('Non-Git panel folds to crossed Git icon, drags and respects automatic hide
   button.props.onClick();
   compact=t.render(p);
   assert.equal(compact.props.style.top,221);
-  assert.equal(compact.props.style.right,6,'right edge should remain within drag clamp');
+  assert.equal(compact.props.style.right,6,'right edge should remain within measured container');
   assert.equal(readVirtualDom(compact,n=>n.props?.className==='dgc-git-cross').length,1);
 
   // The settings tab can remain open after navigating to a non-Git directory.
@@ -347,7 +373,7 @@ test('Non-Git panel folds to crossed Git icon, drags and respects automatic hide
   assert.equal(t.render(p),null,'Non-Git floating panel hides immediately');
   await t.settle();
   assert.equal(t.saved.autoHideNonGit,true);
-  const patches=t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch);
+  const patches=t.calls.filter(c=>c.method==='saveSettings'&&'autoHideNonGit' in c.payload.patch).map(c=>c.payload.patch);
   assert.deepEqual(JSON.parse(JSON.stringify(patches)),[{autoHideNonGit:true}]);
 
   // Return to a Git Session: even with hide enabled the compact Git icon reappears without a cross.
@@ -452,4 +478,60 @@ test('commit confirmation remains two lines without tokens when details disabled
   t.fireExpiry();
   assert.equal(readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-feedback').length,0);
   t.unmount(pill);
+});
+
+
+test('floating panel is clamped on all four sides using actual parent dimensions and persists completed drags',async()=>{
+  const t=clientHarness({simulateDom:true});
+  const p=t.mount('shell.overlay');t.render(p);await t.settle();
+  t.render(p);
+  const grip=readVirtualDom(t.render(p),n=>n.props?.className==='dgc-grip')[0];
+  const root={offsetTop:382,offsetWidth:180,offsetHeight:120,offsetParent:t.container};
+  const el={closest:()=>root,setPointerCapture(){},releasePointerCapture(){}};
+  const start={button:0,pointerId:40,clientX:300,clientY:300,currentTarget:el};
+  grip.props.onPointerDown(start);
+  grip.props.onPointerMove({...start,clientX:-9999,clientY:-9999});
+  let rootDom=t.render(p);
+  assert.equal(rootDom.props.style.right,614,'left limit = 800-180-6');
+  assert.equal(rootDom.props.style.top,6,'top limit');
+  grip.props.onPointerMove({...start,clientX:9999,clientY:9999});
+  rootDom=t.render(p);
+  assert.equal(rootDom.props.style.right,6,'right limit');
+  assert.equal(rootDom.props.style.top,474,'bottom limit = 600-120-6');
+  grip.props.onPointerUp(start);
+  await t.settle();
+  const saves=t.calls.filter(x=>x.method==='saveSettings'&&'floatingPosition' in x.payload.patch);
+  assert.equal(saves.length,1,'one write per completed drag, not per pointer frame');
+  assert.deepEqual(JSON.parse(JSON.stringify(saves[0].payload.patch.floatingPosition)),{right:6,top:474});
+  assert.deepEqual(JSON.parse(JSON.stringify(t.saved.floatingPosition)),{right:6,top:474});
+  t.unmount(p);
+});
+
+test('saved position hydrates on next mount; resize snaps inside viewport and reset button returns default',async()=>{
+  const t=clientHarness({simulateDom:true,initialPosition:{right:230,top:280}});
+  const pill=t.mount('shell.overlay');t.render(pill);await t.settle();
+  let dom=t.render(pill);
+  assert.equal(dom.props.style.right,230);
+  assert.equal(dom.props.style.top,280);
+  t.resize(330,210);
+  dom=t.render(pill);
+  assert.equal(dom.props.style.right,144,'left is 6px inside the smaller container');
+  assert.equal(dom.props.style.top,84,'bottom is 6px inside the smaller container');
+  await t.settle();
+  assert.deepEqual(JSON.parse(JSON.stringify(t.saved.floatingPosition)),{right:144,top:84});
+  const settings=t.mount('sidebar.right.pane.tab');t.render(settings);await t.settle();
+  const button=readVirtualDom(t.render(settings),matchButton('Reset floating window position'))[0];
+  assert.ok(button,'native settings supports a reset position button');
+  button.props.onClick();
+  await t.settle();
+  assert.equal(t.saved.floatingPosition,null,'reset persists default marker');
+  dom=t.render(pill);
+  assert.equal(dom.props.style.bottom,98);
+  assert.equal(dom.props.style.right,24);
+  // On a short window the default bottom anchor can put the panel above the top;
+  // the next measured size-change event must keep it visible.
+  t.resize(250,90);
+  dom=t.render(pill);
+  assert.ok(dom.props.style.top>=6,'default is re-clamped if it does not fit');
+  t.unmount(pill);t.unmount(settings);
 });

@@ -157,7 +157,7 @@ test('non-Git workspaces expose a neutral status and editable global settings wi
     assert.deepEqual(status,{isRepository:false,root:null});
     assert.deepEqual(await service.changeToken({cwd}),{token:null});
     assert.deepEqual(await service.settings({cwd}),{
-      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,autoHideNonGit:false,showTokenDetails:false,countdownColor:'#f59e0b',
+      globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,autoHideNonGit:false,showTokenDetails:false,countdownColor:'#f59e0b',floatingPosition:null,
       isRepository:false,root:null,
     });
     const saved=await service.saveSettings({cwd,patch:{globalInstruction:'No scope',model:{provider:'mock',model:'x'}}});
@@ -433,3 +433,22 @@ test('production service propagates distinct classification/generation efforts a
     assert.equal(result.message,'feat(db): add avatar URL');
   } finally {service.close();}
 }));
+
+test('floating position persists globally, validates coordinates and remains backward compatible',async()=>{
+  const base=await mkdtemp(join(tmpdir(),'dgc-position-'));
+  try {
+    const filename=join(base,'settings.json');
+    const store=new InstructionStore(filename);
+    assert.equal((await store.get('/a')).floatingPosition,null);
+    const saved=await store.save('/a',{floatingPosition:{right:235,top:162}});
+    assert.deepEqual(saved.floatingPosition,{right:235,top:162});
+    assert.deepEqual((await new InstructionStore(filename).get('/another')).floatingPosition,{right:235,top:162});
+    await assert.rejects(store.save(null,{floatingPosition:{right:-1,top:30}}),/floatingPosition/);
+    await assert.rejects(store.save(null,{floatingPosition:{right:Number.POSITIVE_INFINITY,top:30}}),/floatingPosition/);
+    await assert.rejects(store.save(null,{floatingPosition:{right:30,top:'4'}}),/floatingPosition/);
+    assert.deepEqual((await store.get('/a')).floatingPosition,{right:235,top:162});
+    const cleared=await store.save(null,{floatingPosition:null});
+    assert.equal(cleared.floatingPosition,null);
+    assert.equal((await new InstructionStore(filename).get('/another')).floatingPosition,null);
+  }finally{await rm(base,{recursive:true,force:true});}
+});
