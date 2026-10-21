@@ -75,26 +75,51 @@ test('Host mounts on the authenticated /api Fetch seam without webServer', async
   await Promise.all(cleanups.map(async cleanup => { if (typeof cleanup === 'function') await cleanup(); }));
 });
 
-test('large diff uses map/reduce and preserves instructions in the final request', async () => {
-  const utils={
-    redactSecrets:(text)=>text.replaceAll('secret','[REDACTED]'),
-    splitUnifiedDiffIntoFileChunks:diff=>diff.split(/(?=diff --git )/).filter(Boolean),
-    groupDiffChunksByBudget:(chunks,max)=>{
-      const groups=[];let buf='';for(const s of chunks){if(buf.length&&buf.length+s.length>max){groups.push(buf);buf='';}buf+=s;}if(buf)groups.push(buf);return groups;
-    }
+test('large Diff routes through exactly one classification call and one final generation call', async () => {
+  const snapshot = {
+    mode: 'staged',
+    paths: ['drizzle/meta/0000_snapshot.json', 'drizzle/0001_add_columns.sql'],
+    additions: 2110, deletions: 0, binary: 0,
+    diff: [
+      'diff --git a/drizzle/meta/0000_snapshot.json b/drizzle/meta/0000_snapshot.json',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/drizzle/meta/0000_snapshot.json',
+      '@@ -0,0 +1,2102 @@',
+      ...Array.from({ length: 2102 }, (_, i) => '+const credential=secret-for-redaction; // ' + i),
+      'diff --git a/drizzle/0001_add_columns.sql b/drizzle/0001_add_columns.sql',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/drizzle/0001_add_columns.sql',
+      '@@ -0,0 +1,8 @@',
+      ...Array.from({ length: 8 }, (_, i) => '+ALTER TABLE db ADD column' + i + ' TEXT;'),
+    ].join('\n') + '\n',
   };
-  const snapshot={ mode:'staged', paths:['src/a.ts','src/b.ts'], additions:50,deletions:5,binary:0,
-    diff:'diff --git a/src/a.ts b/src/a.ts\n' + '+const secret=1\n'.repeat(60) + 'diff --git a/src/b.ts b/src/b.ts\n' + '+const next=2\n'.repeat(60),
-  };
-  const calls=[];
-  const output=await generateMessage(snapshot,{globalInstruction:'English',repositoryInstruction:'Scope: core',inheritGlobal:true},async payload=>{
-    calls.push(payload);
-    return payload.system.includes('Extract only')?'Document changes':'feat(core): document changes';
-  },{budget:450,utils});
-  assert.ok(calls.length>2);
-  assert.equal(output,'feat(core): document changes');
-  assert.match(calls.at(-1).system,/Global|GLOBAL/);
-  assert.match(calls.at(-1).system,/Scope: core/);
-  assert.ok(calls.every(call=>!call.prompt.includes('secret')));
-  assert.match(calls.at(-1).prompt,/src\/b.ts/);
+  const calls = [];
+  const output = await generateMessage(snapshot,
+    { globalInstruction: 'English', repositoryInstruction: 'Scope: database', inheritGlobal: true },
+    async payload => {
+      calls.push(payload);
+      if (payload.purpose === 'classify') return '{"decisions":[{"id":1,"readFullDiff":false}]}';
+      return 'feat(db): add schema columns';
+    },
+    {
+      redact: text => text.replaceAll('secret-for-redaction', '[REDACTED]'),
+      contextWindow: 1000000,
+      decisionReasoningEffort: 'low',
+      generationReasoningEffort: 'off',
+    });
+  assert.equal(output, 'feat(db): add schema columns');
+  assert.equal(calls.length, 2, 'one classifier plus one generator, no old Map-Reduce');
+  assert.equal(calls[0].purpose, 'classify');
+  assert.equal(calls[0].reasoningEffort, 'low');
+  assert.equal(calls[1].purpose, 'generate');
+  assert.equal(calls[1].reasoningEffort, 'off');
+  assert.match(calls[1].system, /GLOBAL COMMIT INSTRUCTION/);
+  assert.match(calls[1].system, /Scope: database/);
+  assert.match(calls[1].prompt, /TRUNCATED GIT PATCH PREVIEW/);
+  assert.match(calls[1].prompt, /drizzle\/0001_add_columns\.sql/);
+  assert.doesNotMatch(calls[1].prompt, /\+const credential=secret-for-redaction/);
+  assert.ok(calls.every(call => !call.prompt.includes('secret-for-redaction')));
+  assert.ok(calls[1].prompt.includes('ALTER TABLE db ADD column7 TEXT'));
 });
