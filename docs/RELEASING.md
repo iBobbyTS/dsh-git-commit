@@ -6,7 +6,7 @@ The release pipeline follows the existing `@ibobbyts/svelte-ui-utils` pattern: v
 
 ## One-time setup: first manual npm publication
 
-Trusted Publishing is configured on an **existing** npm package. This repository initially contains version **0.2.0**, so do **not** create/push a `v0.2.0` release tag before completing this manual step.
+Trusted Publishing is configured on an **existing** npm package. Version **0.2.0** had a broken Client module registration ID. Use **0.2.1 or newer** for publication; never publish or install the broken 0.2.0 artifact. Do not push an OIDC release tag until Trusted Publishing is configured and a first npm version exists.
 
 1. Verify you control the npm **`@ibobbyts`** scope and that `@ibobbyts/dsh-git-commit` is available. From your own terminal, check the namespace on npmjs.com.
 2. Clone `https://github.com/iBobbyTS/dsh-git-commit`, pull the release commit and inspect the source, README, `package.json`, and pack output.
@@ -21,7 +21,7 @@ Trusted Publishing is configured on an **existing** npm package. This repository
    ```
 
    `prepublishOnly` reruns `npm run check` before the real publish. npm may require browser login and 2FA. **Only you** should perform the first publication; this workflow does not attempt to use your credentials.
-4. Confirm `npm view @ibobbyts/dsh-git-commit version` returns `0.2.0`.
+4. Confirm `npm view @ibobbyts/dsh-git-commit version` returns the version published (for the initial fixed release, `0.2.1`). If 0.2.0 already exists, npm will reject reusing that version; publish 0.2.1 manually only if Trusted Publishing has not been set up. If OIDC already works, use the tag workflow instead; never publish the same version by both methods.
 5. Go to **npmjs.com → @ibobbyts/dsh-git-commit → Settings → Trusted publishing → GitHub Actions**. Configure exactly:
 
    | Setting | Value |
@@ -37,13 +37,13 @@ Trusted Publishing is configured on an **existing** npm package. This repository
 
 ## Subsequent releases: automatic publish on tags
 
-1. Bump `package.json`'s `version` (e.g., `0.2.1`), update code and docs, run `npm run check`, and merge the change into `main`.
+1. Bump `package.json`'s `version` to the next unused release (e.g., `0.2.2` after the fixed `0.2.1`), update code and docs, run `npm run check`, and merge into `main`.
 2. Push a version tag matching `package.json` exactly:
 
    ```sh
    git checkout main && git pull --ff-only
-   git tag -a v0.2.1 -m 'release v0.2.1'
-   git push origin v0.2.1
+   git tag -a v0.2.2 -m 'release v0.2.2'
+   git push origin v0.2.2
    ```
 
 3. `.github/workflows/npm-publish.yml` installs dependencies, checks source and package metadata, tests, verifies `vX.Y.Z` matches `package.json`, and runs `npm publish --access public` via **OIDC**. The tag must be on `main` history. A `workflow_dispatch` run performs **dry-run validation only** and never publishes.

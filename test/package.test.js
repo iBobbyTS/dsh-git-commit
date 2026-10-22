@@ -7,7 +7,7 @@ const pkg=JSON.parse(source('package.json'));
 
 test('npm package name, host bundle patch and published entries match scoped identity',()=>{
   assert.equal(pkg.name,'@ibobbyts/dsh-git-commit');
-  assert.equal(pkg.version,'0.2.0');
+  assert.equal(pkg.version,'0.2.1');
   assert.equal(pkg.publishConfig.access,'public');
   assert.equal(pkg.repository.url,'git+https://github.com/iBobbyTS/dsh-git-commit.git');
   assert.equal(pkg.dsh.bundle.patch,'./cordis.patch.yml');

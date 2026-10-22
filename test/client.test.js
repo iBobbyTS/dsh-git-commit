@@ -16,6 +16,17 @@ const BUILT_IN_CLIENT_PACKAGES = new Set([
   '@deepseek-ai/dsh-client-ui-sidebar-right',
 ]);
 
+test('DSH boot graph can materialize the Client under its exact npm package identity', () => {
+  const registrations = new Map();
+  const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  runInNewContext(source, {
+    window: { __ModuleLoader__: { load: ({ id, factory }) => registrations.set(id, factory) } },
+  });
+  assert.equal(registrations.size, 1, 'one client registration per bundle');
+  assert.equal(typeof registrations.get(manifest.name), 'function',
+    `DSH expects __ModuleLoader__.load to register ${manifest.name}, not an unscoped alias`);
+});
+
 test('Client loader declares only real DSH package dependencies', () => {
   assert.equal(manifest.name, '@ibobbyts/dsh-git-commit');
   assert.equal(manifest.dsh.client.platform, 'web');
