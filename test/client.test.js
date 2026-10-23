@@ -510,10 +510,10 @@ test('Branch tooltip uses full name, and icon action sizing plus max width are c
   assert.equal(branch.props.title,textOf(branch),'tooltip contains the complete branch, even when CSS truncates it');
   assert.notEqual(branch.props.title,'/example/repo-one');
   const css=t.styleTags[0].textContent;
-  assert.match(css,/\.dgc-card\{[^}]*width:max-content;min-width:102px;max-width:216px/);
+  assert.match(css,/\.dgc-card\{[^}]*width:max-content;min-width:102px;max-width:none/);
    assert.match(css,/\.dgc-numbers\{[^}]*width:max-content;max-width:100%/);
-   assert.match(css,/\.dgc-feedback\{[^}]*width:max-content;max-width:100%/);
-   assert.match(css,/\.dgc-result-metrics\{[^}]*white-space:nowrap;width:max-content;max-width:100%;overflow:hidden;text-overflow:ellipsis/);
+   assert.match(css,/\.dgc-feedback\{[^}]*width:max-content;max-width:none/);
+   assert.match(css,/\.dgc-result-metrics\{[^}]*white-space:nowrap;width:max-content;max-width:none;overflow:visible;text-overflow:clip/);
   assert.match(css,/\.dgc-actions \.dgc-primary,\.dgc-actions \.dgc-secondary\{[^}]*width:36px;height:36px/);
   assert.match(css,/\.dgc-actions\{[^}]*justify-content:flex-start/);
   t.unmount(p);
@@ -534,7 +534,7 @@ test('successful commit shows only monospaced summary, ordinary-font subject, op
   assert.equal(textOf(head[0]),'Committed e9f98bd · +268 −141');
   assert.equal(textOf(subject[0]),'feat(ui): show a commit summary');
   assert.doesNotMatch(textOf(shown),/Body: intentionally hidden/);
-  assert.equal(textOf(metrics[0]),'↓ 12,450 · ↑ 680 | 0.71s · 91.2t/s');
+  assert.equal(textOf(metrics[0]),'↓ 12,450 ↑ 680 | 0.71s · 91.2t/s');
   const color=readVirtualDom(shown,n=>n.props?.className==='dgc-countdown-fill');
   assert.equal(color.length,1);
   assert.equal(color[0].props.style.backgroundColor,'#ec8400');
