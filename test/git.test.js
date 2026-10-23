@@ -508,7 +508,7 @@ test('floating position persists globally, validates coordinates and remains bac
 });
 
 test('concurrent commit callers share the same result and publish progress',async()=>fixture(async root=>{
-  await writeFile(join(root,'a.txt'),'one\\nshared\\n');
+  await writeFile(join(root,'a.txt'),'one\nshared\n');
   const store=new InstructionStore(join(root,'.git','settings.json'));
   let release;
   let starts=0;
