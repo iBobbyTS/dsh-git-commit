@@ -511,6 +511,9 @@ test('Branch tooltip uses full name, and icon action sizing plus max width are c
   assert.notEqual(branch.props.title,'/example/repo-one');
   const css=t.styleTags[0].textContent;
   assert.match(css,/\.dgc-card\{[^}]*width:max-content;min-width:102px;max-width:216px/);
+   assert.match(css,/\.dgc-numbers\{[^}]*width:max-content;max-width:100%/);
+   assert.match(css,/\.dgc-feedback\{[^}]*width:max-content;max-width:100%/);
+   assert.match(css,/\.dgc-result-metrics\{[^}]*white-space:nowrap;width:max-content;max-width:100%;overflow:hidden;text-overflow:ellipsis/);
   assert.match(css,/\.dgc-actions \.dgc-primary,\.dgc-actions \.dgc-secondary\{[^}]*width:36px;height:36px/);
   assert.match(css,/\.dgc-actions\{[^}]*justify-content:flex-start/);
   t.unmount(p);
