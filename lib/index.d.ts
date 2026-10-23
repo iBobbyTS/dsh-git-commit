@@ -68,7 +68,7 @@ export interface GitCommitApi {
         additions: number; deletions: number; binary: number;
         untracked: number; unknownUntrackedLines: number; stagedFiles: number }
   >;
-  changeToken(request: GitCommitRequest): Promise<{ token: number | null }>;
+  changeToken(request: GitCommitRequest): Promise<{ token: number | null; commitState: { id: number; working: boolean; result: GitCommitResult | null } | null }>;
   settings(request?: GitCommitRequest): Promise<GitCommitSettings>;
   saveSettings(request: GitCommitRequest & { patch: Partial<Pick<GitCommitSettings, 'globalInstruction' | 'repositoryInstruction' | 'inheritGlobal' | 'model' | 'repositoryModel' | 'autoHideNonGit' | 'showTokenDetails' | 'countdownColor' | 'floatingPosition'>> }): Promise<GitCommitSettings>;
   models(): Promise<{ models: Array<{provider:string;providerName:string;model:string;name:string}>; defaultModel: {provider:string;model:string}|null }>;
