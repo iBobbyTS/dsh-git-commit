@@ -272,7 +272,7 @@ test('Non-Git workspaces open the Global tab and allow global changes without sh
   const page=t.render(tab);
   assert.equal(readVirtualDom(page,matchButton('Global'))[0].props['aria-selected'],true);
   const fields=readVirtualDom(page,n=>n.type==='label').map(textOf);
-  assert.match(fields.join('|'),/Global commit instruction.*Model/s);
+  assert.match(fields.join('|'),/Model.*Global commit instruction/s);
   assert.doesNotMatch(fields.join('|'),/Repository commit instruction|Inherit global instruction/);
   assert.equal(readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox').length,2);
   assert.deepEqual(readVirtualDom(page,n=>n.type==='button').map(x=>x.props['aria-label']),
@@ -531,7 +531,9 @@ test('successful commit shows only monospaced summary, ordinary-font subject, op
   const subject=readVirtualDom(shown,n=>n.props?.className==='dgc-result-subject');
   const metrics=readVirtualDom(shown,n=>n.props?.className==='dgc-result-metrics');
   assert.equal(head.length,1);
-  assert.equal(textOf(head[0]),'Committed e9f98bd · +268 −141');
+  assert.equal(textOf(head[0]).replace(/\s+/g,' ').trim(),'Committed e9f98bd · +268 −141');
+   assert.equal(readVirtualDom(head[0],n=>n.props?.className==='dgc-add').length,1);
+   assert.equal(readVirtualDom(head[0],n=>n.props?.className==='dgc-del').length,1);
   assert.equal(textOf(subject[0]),'feat(ui): show a commit summary');
   assert.doesNotMatch(textOf(shown),/Body: intentionally hidden/);
   assert.equal(textOf(metrics[0]),'↓ 12,450 ↑ 680 | 0.71s · 91.2t/s');

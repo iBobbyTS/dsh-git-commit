@@ -208,7 +208,7 @@ test('non-Git workspaces expose a neutral status and editable global settings wi
     }, {store});
     const status=await service.status({cwd});
     assert.deepEqual(status,{isRepository:false,root:null});
-    assert.deepEqual(await service.changeToken({cwd}),{token:null});
+    assert.deepEqual(await service.changeToken({cwd}),{token:null,commitState:null});
     assert.deepEqual(await service.settings({cwd}),{
       globalInstruction:'',repositoryInstruction:'',inheritGlobal:true,model:null,repositoryModel:null,autoHideNonGit:false,showTokenDetails:false,countdownColor:'#f59e0b',floatingPosition:null,
       isRepository:false,root:null,
