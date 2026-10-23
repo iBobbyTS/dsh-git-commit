@@ -506,3 +506,32 @@ test('floating position persists globally, validates coordinates and remains bac
     assert.equal((await new InstructionStore(filename).get('/another')).floatingPosition,null);
   }finally{await rm(base,{recursive:true,force:true});}
 });
+
+test('concurrent commit callers share the same result and publish progress',async()=>fixture(async root=>{
+  await writeFile(join(root,'a.txt'),'one\\nshared\\n');
+  const store=new InstructionStore(join(root,'.git','settings.json'));
+  let release;
+  let starts=0;
+  const pause=new Promise(resolve=>{release=resolve;});
+  const service=new GitCommitService({ ...ctx, llm:{...ctx.llm,listProviders:()=>[{id:'mock',name:'Mock'}],listModels:async()=>[{provider:'mock',id:'m1',name:'M1'}],resolveModelInfo:async()=>({reasoning:{efforts:[{id:'off'}]}})} },{store,generator:async()=>{
+    starts++;
+    await pause;
+    return 'fix: shared commit';
+  }});
+  try {
+    const first=service.commit({cwd:root});
+    const second=service.commit({cwd:root});
+    for(let n=0;n<25&&!starts;n++)await new Promise(resolve=>setTimeout(resolve,5));
+    assert.equal(starts,1);
+    const state=await service.changeToken({cwd:root});
+    assert.equal(state.commitState.working,true);
+    release();
+    const [a,b]=await Promise.all([first,second]);
+    assert.deepEqual(a,b);
+    assert.equal(a.success,true,a.error);
+    const done=await service.changeToken({cwd:root});
+    assert.equal(done.commitState.working,false);
+    assert.deepEqual(done.commitState.result,a);
+    assert.equal((await git(root,['rev-list','--count','HEAD'])).trim(),'2');
+  }finally{release();service.close();}
+}));

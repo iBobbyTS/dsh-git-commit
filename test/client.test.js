@@ -541,6 +541,7 @@ test('successful commit shows only monospaced summary, ordinary-font subject, op
   assert.match(t.styleTags[0].textContent,/\.dgc-result-head\{[^}]*ui-monospace/);
   assert.match(t.styleTags[0].textContent,/\.dgc-result-subject\{[^}]*system-ui/);
   assert.match(t.styleTags[0].textContent,/\.dgc-result-metrics\{[^}]*ui-monospace/);
+   assert.match(t.styleTags[0].textContent,/@keyframes dgc-spin/);
   assert.match(t.styleTags[0].textContent,/@keyframes dgc-countdown\{from\{transform:scaleX\(1\)\}to\{transform:scaleX\(0\)\}\}/);
   t.fireExpiry();
   assert.equal(readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-feedback').length,0,
