@@ -105,7 +105,7 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
       scope.pending.push({idx,callback});
     },
   };
-  const registrations = [], definitions = new Map(), tabTypes = new Map(), opened=[], styleTags=[];
+  const registrations = [], definitions = new Map(), slotEntries = new Map(), tabTypes = new Map(), opened=[], styleTags=[];
   const listeners = new Map();
   let observed=[];
   const container={clientWidth:800,clientHeight:600,getBoundingClientRect:()=>({left:0,top:0})};
@@ -160,10 +160,10 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
         if(failSave)throw new Error('Permission denied');
         for(const [key,val] of Object.entries(payload.patch)) {
           if(['repositoryInstruction','inheritGlobal','repositoryModel'].includes(key)) {
-            if(payload.cwd.includes('repo-one'))repoConfig[key]=val;
+            if(payload.cwd?.includes('repo-one'))repoConfig[key]=val;
           }else saved[key]=val;
         }
-        value=payload.cwd.includes('repo-one')
+        value=payload.cwd?.includes('repo-one')
           ? {...saved,...repoConfig,isRepository:true,root:'/example/repo-one'}
           : {...saved,repositoryInstruction:'',inheritGlobal:true,repositoryModel:null,isRepository:false,root:null};
       }else if(method==='commit')value={
@@ -178,7 +178,9 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     sidebarRight:{mounted:selected,openTab:kind=>opened.push(kind)},
     sidebarRightTabs:{register:def=>{tabTypes.set(def.kind,def);return()=>{};}},
     slots:{inject:(_key,callback)=>callback(),register:(opts,comp)=>{
-      definitions.set(opts.name,comp);return()=>{};
+      definitions.set(opts.name,comp);
+      slotEntries.set(opts.name,opts);
+      return()=>{};
     }},
   });
   function mount(slot) {
@@ -217,7 +219,7 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     for(const listener of listeners.get('resize')??[]) listener();
   };
   const advanceTime = ms => {if (clockNow === null) throw new Error('fakeNow required'); clockNow += ms;};
-  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,resize,container,advanceTime,locale};
+  return {sessions,selected,saved,repoConfig,calls,opened,definitions,slotEntries,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,resize,container,advanceTime,locale};
 }
 
 const matchButton = (name) => node=>node.type==='button' && node.props['aria-label']===name;
@@ -352,7 +354,7 @@ test('Non-Git workspaces open the Global tab and allow global changes without sh
   assert.doesNotMatch(fields.join('|'),/Repository commit instruction|Inherit global instruction/);
   assert.equal(readVirtualDom(page,n=>n.type==='input'&&n.props.type==='checkbox').length,2);
   assert.deepEqual(readVirtualDom(page,n=>n.type==='button').map(x=>x.props['aria-label']),
-    ['Repository','Global','Reset floating window position']);
+    ['Repository','Global']);
   const global=readVirtualDom(page,n=>n.type==='textarea')[0];
   global.props.onChange({target:{value:'Updated global'}});
   global.props.onBlur();await t.settle();
@@ -391,7 +393,8 @@ test('Repository and Global tabs show only scoped controls and serialize indepen
   assert.ok(namedSelect(globalPage,'Global model'));
   assert.equal(readVirtualDom(globalPage,n=>n.type==='textarea').length,1);
   assert.equal(readVirtualDom(globalPage,n=>n.type==='input'&&n.props.type==='checkbox').length,2);
-  assert.ok(readVirtualDom(globalPage,matchButton('Reset floating window position'))[0]);
+  assert.equal(readVirtualDom(globalPage,matchButton('Reset floating window position')).length,0,
+    'position reset is no longer duplicated in sidebar settings');
   assert.doesNotMatch(textOf(globalPage),/Repository commit instruction|Inherit global instruction/);
   assert.deepEqual(JSON.parse(JSON.stringify(t.calls.filter(c=>c.method==='saveSettings').map(c=>c.payload.patch))),
     [{inheritGlobal:false},{repositoryInstruction:'New repo instruction'}]);
@@ -639,14 +642,15 @@ test('success notice hover pauses dismissal and progress, then resumes remaining
   t.advanceTime(3750);
   card.props.onMouseEnter();
   assert.equal(bar().props.style.animationPlayState,'paused');
-  assert.equal(bar().props.style.animationDelay,'-3750ms');
+  assert.equal(bar().props.style.animationDelay,undefined,
+    'never rewrite the underlying animation timeline during hover');
   t.fireExpiry(); // the original 10s timer was cancelled on hover
   t.advanceTime(30000);
   assert.equal(readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-feedback').length,1);
   card.props.onMouseLeave();
   assert.equal(bar().props.style.animationPlayState,'running');
-  assert.equal(bar().props.style.animationDelay,'-3750ms',
-    'resume keeps elapsed progress, rather than restarting from zero');
+  assert.equal(bar().props.style.animationDelay,undefined,
+    'resuming the same CSS timeline must not re-seek with a negative delay');
   t.fireExpiry(); // remaining 6250ms
   assert.equal(readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-feedback').length,0);
   t.unmount(pill);
@@ -667,6 +671,57 @@ test('success notice starts paused if the cursor is already over the card',async
   assert.equal(bar().props.style.animationPlayState,'running');
   t.fireExpiry();
   assert.equal(readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-feedback').length,0);
+  t.unmount(pill);
+});
+
+test('bundle-detail reset works without an active session and follows DSH language',async()=>{
+  const t=clientHarness({initial:null,initialPosition:{right:325,top:210}});
+  const detail=t.mount('plugins.bundle.config');
+  let page=t.render(detail,{view:'page'});
+  assert.equal(t.slotEntries.get('plugins.bundle.config')?.key,'@ibobbyts/dsh-git-commit');
+  assert.equal(readVirtualDom(page,matchButton('Reset floating window position')).length,1);
+  t.locale.setLocale('zh');
+  page=t.render(detail,{view:'page'});
+  const reset=readVirtualDom(page,matchButton('恢复浮窗默认位置'))[0];
+  assert.ok(reset,'plugin-detail button updates when the host locale switches');
+  reset.props.onClick();
+  await t.settle();
+  assert.equal(t.saved.floatingPosition,null);
+  const saves=t.calls.filter(x=>x.method==='saveSettings'&&'floatingPosition' in x.payload.patch);
+  assert.equal(saves.length,1);
+  assert.equal(saves[0].payload.cwd,undefined,
+    'global reset must work without any active Git repository/session');
+  t.unmount(detail);
+});
+
+test('repeated hover cycles never seek the progress animation or exhaust its track',async()=>{
+  const t=clientHarness({initialShowTokens:true,fakeNow:200000});
+  const pill=t.mount('shell.overlay');
+  t.render(pill);await t.settle();t.render(pill);
+  await readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0].props.onClick();
+  const card=readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-card')[0];
+  const bar=()=>readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-countdown-fill')[0];
+  const track=()=>readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-countdown-track');
+  const initialKey=readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-feedback')[0].props.key;
+  for(let i=0;i<7;i++){
+    t.advanceTime(200);
+    card.props.onMouseEnter();
+    let state=bar().props.style;
+    assert.equal(state.animationPlayState,'paused');
+    assert.equal(state.animationDelay,undefined,
+      'negative delay must never be recomputed on hover');
+    assert.equal(track().length,1);
+    t.advanceTime(2500);
+    card.props.onMouseLeave();
+    state=bar().props.style;
+    assert.equal(state.animationPlayState,'running');
+    assert.equal(state.animationDelay,undefined);
+    assert.equal(track().length,1);
+    const current=readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-feedback')[0];
+    assert.equal(current.props.key,initialKey,'the animation-bearing DOM node retains identity');
+  }
+  t.fireExpiry();
+  assert.equal(track().length,0,'dismissal occurs only after unhovered time elapses');
   t.unmount(pill);
 });
 
@@ -755,8 +810,15 @@ test('saved position hydrates on next mount; resize snaps inside viewport and re
   await t.settle();
   assert.deepEqual(JSON.parse(JSON.stringify(t.saved.floatingPosition)),{right:144,top:84});
   const settings=t.mount('sidebar.right.pane.tab');t.render(settings);await t.settle();
-  const button=readVirtualDom(switchTab(t.render,settings,'Global'),matchButton('Reset floating window position'))[0];
-  assert.ok(button,'native settings supports a reset position button');
+  assert.equal(readVirtualDom(switchTab(t.render,settings,'Global'),
+    matchButton('Reset floating window position')).length,0,'sidebar must not contain the button');
+  assert.equal(t.slotEntries.get('plugins.bundle.config')?.key,manifest.name,
+    'the plugin detail config slot must be keyed by its exact npm package name');
+  const detail=t.mount('plugins.bundle.config');
+  assert.equal(t.render(detail,{view:'summary'}),null,'bundle list view stays compact');
+  const button=readVirtualDom(t.render(detail,{view:'page'}),
+    matchButton('Reset floating window position'))[0];
+  assert.ok(button,'native Plugins bundle details page exposes position reset');
   button.props.onClick();
   await t.settle();
   assert.equal(t.saved.floatingPosition,null,'reset persists default marker');
@@ -768,5 +830,5 @@ test('saved position hydrates on next mount; resize snaps inside viewport and re
   t.resize(250,90);
   dom=t.render(pill);
   assert.ok(dom.props.style.top>=6,'default is re-clamped if it does not fit');
-  t.unmount(pill);t.unmount(settings);
+  t.unmount(pill);t.unmount(settings);t.unmount(detail);
 });

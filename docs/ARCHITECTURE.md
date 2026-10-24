@@ -31,7 +31,7 @@ Each direct `ctx.llm.stream()` call captures provider `usage` and local monotoni
 
 ## Config and lifecycle
 
-Settings are atomically written to `$DSH_HOME/dsh-git-commit.json`, permissions `0600` on newly written files, with per-repository instructions keyed by canonical Git root and global UI settings. Global `floatingPosition` is optional, interpreted as top/right CSS pixels, and null resets to the default lower-right anchor. Writes are serialized; UI position changes are persisted at the end of each completed drag rather than on every pointer frame to avoid excessive disk writes. Window/layout clipping corrections also persist.
+Settings are atomically written to `$DSH_HOME/dsh-git-commit.json`, permissions `0600` on newly written files, with per-repository instructions keyed by canonical Git root and global UI settings. Global `floatingPosition` is optional, interpreted as top/right CSS pixels, and null resets to the default lower-right anchor. Writes are serialized; UI position changes are persisted at the end of each completed drag rather than on every pointer frame to avoid excessive disk writes. Window/layout clipping corrections also persist. The plugin owns a `plugins.bundle.config` contribution keyed by `@ibobbyts/dsh-git-commit`, exposing the global position reset on its Plugins bundle-detail page rather than in the session sidebar.
 
 ## Validation
 
@@ -41,4 +41,4 @@ Settings are atomically written to `$DSH_HOME/dsh-git-commit.json`, permissions 
 
 ## Completion notice
 
-The Client keeps the success notice visible for 10 seconds of **unhovered** time. Hovering anywhere on the expanded card pauses both the dismissal timer and CSS progress animation. Moving the pointer out resumes from the remaining time; collapsing the card resumes the timer. A new commit result replaces the previous countdown.
+The Client keeps the success notice visible for 10 seconds of **unhovered** time. Hovering anywhere on the expanded card pauses both the dismissal timer and CSS progress animation. The CSS animation timeline retains its original ten-second duration without recalculating negative `animation-delay` on hover transitions, avoiding progress-bar disappearance after repeated mouse entries. Moving the pointer out resumes from the remaining time; collapsing the card resumes the timer. A new commit result replaces the previous countdown.

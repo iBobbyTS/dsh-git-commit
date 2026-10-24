@@ -5,7 +5,7 @@ A lightweight floating **Git status + AI Commit** plugin for [DeepSeek Harness (
 - View the current Session's Git branch and changed-line counts in a draggable, collapsible panel.
 - Generate a commit message through a model configured in DSH, then make **one real Git commit**.
 - Configure independent **Repository** / **Global** settings tabs: per-repository model overrides (default: inherit global), writing instructions, Token metrics, and countdown color in the native DSH right sidebar.
-- Keep the floating panel within the visible window; **drag locations persist** across restarts. The settings panel includes **Reset floating window position**.
+- Keep the floating panel within the visible window; **drag locations persist** across restarts. The plugin's **Plugins → dsh-git-commit** details page includes **Reset floating window position**.
 - Non-Git directories show a compact warning or remain hidden according to your preference.
 
 ## Install
