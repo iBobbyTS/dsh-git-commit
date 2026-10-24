@@ -8,12 +8,12 @@
 
 ## Git index isolation
 
-1. `plannedMode()` chooses `staged` if the index has staged entries; otherwise it chooses `all`.
-2. `preparedSnapshot()` creates a stable candidate tree and Diff. For `all`, a temporary `GIT_INDEX_FILE` keeps the real index untouched during model generation.
-3. Commit message generation sees only the preselected snapshot. After generation, the plugin verifies HEAD, index, and snapshot tree, then performs `git commit` with normal hooks. Changed content fails rather than being silently included.
-4. The real committed message, seven-digit hash, and actual line statistics are returned. A rejected hook never reports success; staging may remain after a failed `all` commit.
+1. `plannedMode()` chooses `staged` if the real index has staged entries; otherwise it chooses `all`.
+2. If there are no staged changes, the Host runs `git add -A` on the real index **before** generating a commit message. If message generation fails, the staged content is deliberately retained for inspection or retry. Existing staged changes are not expanded with unstaged changes.
+3. `preparedSnapshot(root, 'staged')` captures the candidate tree and Diff from the real index. Commit message generation sees only this preselected snapshot. After generation, the plugin verifies HEAD and index tree, then performs `git commit` with normal hooks. Newly edited, unstaged content is not silently added to the commit.
+4. The result retains the originally selected scope (`staged` or `all`). The real committed message, seven-digit hash, and actual line statistics are returned. A rejected hook never reports success; staged changes may remain after failure.
 
-The plugin does not fetch, push, amend, reset refs, or stage ignored files. Multiple plugin commits for the same repository serialize.
+The plugin does not fetch, push, amend, reset refs, or stage ignored files. Simultaneous plugin commits for the same repository share one in-flight operation and result.
 
 ## LLM context routing (at most two calls)
 
@@ -38,3 +38,7 @@ Settings are atomically written to `$DSH_HOME/dsh-git-commit.json`, permissions 
 - `npm run check`: syntax checks and Node integration tests using real temporary Git repositories plus a Client browser-loader hook harness.
 - `npm pack --dry-run --ignore-scripts`: inspect the publishable artifact.
 - Real Desktop rendering, actual LLM provider calls, and registry package installation must still be checked in an installed DSH runtime; passing component tests alone cannot establish those behaviors.
+
+## Completion notice
+
+The Client keeps the success notice visible for 10 seconds of **unhovered** time. Hovering anywhere on the expanded card pauses both the dismissal timer and CSS progress animation. Moving the pointer out resumes from the remaining time; collapsing the card resumes the timer. A new commit result replaces the previous countdown.

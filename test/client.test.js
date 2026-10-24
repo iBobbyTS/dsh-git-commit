@@ -50,7 +50,7 @@ function readVirtualDom(node, predicate, found = []) {
 }
 
 /** Minimal hook scheduler runs the published browser bundle (including effects). */
-function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', initialPosition = null, simulateDom = false, initialGlobalModel = null, initialRepositoryModel = null, dshDefaultModel = null, catalogModels = [{provider:'mock',model:'m',providerName:'Mock',name:'M'}, {provider:'mock',model:'alt',providerName:'Mock',name:'Alt'}] } = {}) {
+function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', initialPosition = null, simulateDom = false, initialGlobalModel = null, initialRepositoryModel = null, dshDefaultModel = null, fakeNow = null, catalogModels = [{provider:'mock',model:'m',providerName:'Mock',name:'M'}, {provider:'mock',model:'alt',providerName:'Mock',name:'Alt'}] } = {}) {
   const sessions = { ids: ['one', 'two'], byId: {
     one: { id: 'one', cwd: '/example/repo-one' },
     two: { id: 'two', cwd: '/example/plain-directory' },
@@ -99,9 +99,10 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
   };
   let nextInterval=1, nextExpiry=1;
   const intervals=new Map(), expiries=new Map();
+  let clockNow = fakeNow;
   const testTimeout=(fn,delay)=>{
-    // Keep the ten-second notification timeout deterministic and fast.
-    if (delay>=9000 && delay<=10000) { const id=nextExpiry++; expiries.set(id,fn); return id; }
+    // Fake-clock tests capture all timers, including resumed sub-10s notice timeouts.
+    if (clockNow !== null || (delay>=9000 && delay<=10000)) { const id=nextExpiry++; expiries.set(id,fn); return id; }
     return setTimeout(fn,delay);
   };
   const cancelTimeout=id=>{
@@ -110,6 +111,7 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
   };
   runInNewContext(readFileSync(new URL('../lib/client.js',import.meta.url),'utf8'), {
     window,document,setTimeout:testTimeout,clearTimeout:cancelTimeout,
+    Date:clockNow === null ? Date : class extends Date {static now(){return clockNow;}},
     setInterval:(fn)=>{const id=nextInterval++; intervals.set(id,fn);return id;},
     clearInterval:(id)=>intervals.delete(id),
   });
@@ -190,7 +192,8 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     for(const scope of Array.from(observed)) scope.fn();
     for(const listener of listeners.get('resize')??[]) listener();
   };
-  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,resize,container};
+  const advanceTime = ms => {if (clockNow === null) throw new Error('fakeNow required'); clockNow += ms;};
+  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,resize,container,advanceTime};
 }
 
 const matchButton = (name) => node=>node.type==='button' && node.props['aria-label']===name;
@@ -548,6 +551,49 @@ test('successful commit shows only monospaced summary, ordinary-font subject, op
   t.fireExpiry();
   assert.equal(readVirtualDom(t.render(pill),n=>n.props?.className==='dgc-feedback').length,0,
     'ten-second timer must remove all success details and progress');
+  t.unmount(pill);
+});
+
+test('success notice hover pauses dismissal and progress, then resumes remaining duration',async()=>{
+  const t=clientHarness({initialShowTokens:true,fakeNow:100000});
+  const pill=t.mount('shell.overlay');
+  t.render(pill);await t.settle();t.render(pill);
+  const press=readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0];
+  await press.props.onClick();
+  const card=readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-card')[0];
+  const bar=()=>readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-countdown-fill')[0];
+  assert.equal(bar().props.style.animationPlayState,'running');
+  t.advanceTime(3750);
+  card.props.onMouseEnter();
+  assert.equal(bar().props.style.animationPlayState,'paused');
+  assert.equal(bar().props.style.animationDelay,'-3750ms');
+  t.fireExpiry(); // the original 10s timer was cancelled on hover
+  t.advanceTime(30000);
+  assert.equal(readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-feedback').length,1);
+  card.props.onMouseLeave();
+  assert.equal(bar().props.style.animationPlayState,'running');
+  assert.equal(bar().props.style.animationDelay,'-3750ms',
+    'resume keeps elapsed progress, rather than restarting from zero');
+  t.fireExpiry(); // remaining 6250ms
+  assert.equal(readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-feedback').length,0);
+  t.unmount(pill);
+});
+
+test('success notice starts paused if the cursor is already over the card',async()=>{
+  const t=clientHarness({fakeNow:100000});
+  const pill=t.mount('shell.overlay');
+  t.render(pill);await t.settle();t.render(pill);
+  const card=readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-card')[0];
+  card.props.onMouseEnter();
+  await readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0].props.onClick();
+  const bar=()=>readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-countdown-fill')[0];
+  assert.equal(bar().props.style.animationPlayState,'paused');
+  t.fireExpiry();
+  assert.equal(readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-feedback').length,1);
+  card.props.onMouseLeave();
+  assert.equal(bar().props.style.animationPlayState,'running');
+  t.fireExpiry();
+  assert.equal(readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-feedback').length,0);
   t.unmount(pill);
 });
 

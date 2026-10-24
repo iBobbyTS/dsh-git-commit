@@ -57,6 +57,36 @@ test('no staged entries means all tracked and untracked changes are committed', 
   service.close();
 }));
 
+test('no staged changes are staged before model generation and survive a failed generation', async()=>fixture(async root=>{
+  await writeFile(join(root,'a.txt'),'one\nchanged\n');
+  await writeFile(join(root,'new.txt'),'new file\n');
+  assert.equal(await plannedMode(root),'all');
+  let inspected=false;
+  const llm={listProviders:()=>[{id:'mock',name:'Mock'}],
+    listModels:async()=>[{provider:'mock',id:'m',name:'Model'}],
+    resolveModelInfo:async()=>({reasoning:{efforts:[{id:'off'}]}})};
+  const service=new GitCommitService({...ctx,llm},{
+    store:new InstructionStore(join(root,'.git','settings-test.json')),
+    generator:async snapshot=>{
+      inspected=true;
+      assert.equal(snapshot.mode,'staged','model input must be the real staged index');
+      assert.deepEqual((await git(root,['diff','--cached','--name-only'])).trim().split('\n'),
+        ['a.txt','new.txt'],'git add -A runs before model generation');
+      throw new Error('simulated LLM failure');
+    },
+  });
+  try {
+    const result=await service.commit({cwd:root});
+    assert.equal(inspected,true);
+    assert.equal(result.success,false);
+    assert.equal(result.scope,'all');
+    assert.match(result.error,/simulated LLM failure/);
+    assert.equal((await git(root,['diff','--cached','--name-only'])).trim().split('\n').length,2,
+      'failed generation intentionally preserves staging');
+    assert.equal((await git(root,['log','-1','--format=%s'])).trim(),'initial');
+  }finally{service.close();}
+}));
+
 test('snapshot preparation does not mutate index, and rejects worktree changes', async()=>fixture(async root=>{
   await writeFile(join(root,'a.txt'),'one\nchanged\n');
   const snapshot=await preparedSnapshot(root,'all');
