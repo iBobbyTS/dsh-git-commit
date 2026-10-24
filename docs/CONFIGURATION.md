@@ -28,3 +28,7 @@ The initial position is `right: 24px; bottom: 98px`. Each completed drag and aut
 - Optional metrics: `↓ <input> · ↑ <output> | <TTFT>s · <decode speed>t/s`. Input includes uncached, cache-read and cache-write tokens; unknown values show `—`.
 
 For non-Git directories the expanded panel says **Not a git repository** and has a fold button. In the compact state the Git icon has a red cross. Neither state allows committing or opening settings. With automatic hiding enabled, neither state is shown.
+
+## Language
+
+The plugin follows DSH's Client locale service (`@deepseek-ai/dsh-client-locale`) automatically. It provides Simplified Chinese (`zh`) and English (`en`) dictionaries. Changing **DSH Settings → General → Language** updates the plugin's floating panel and settings page without a reload. Other DSH languages fall back to English. There is no separate plugin language setting, and the Git commit message/model output is not translated.

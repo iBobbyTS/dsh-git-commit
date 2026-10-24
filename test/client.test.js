@@ -10,6 +10,7 @@ const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.
 // ui-layout,ui-session,ui-sidebar-right}/package.json), not invented services.
 const BUILT_IN_CLIENT_PACKAGES = new Set([
   '@deepseek-ai/dsh-client-connection',
+  '@deepseek-ai/dsh-client-locale',
   '@deepseek-ai/dsh-client-ui-renderer',
   '@deepseek-ai/dsh-client-ui-layout',
   '@deepseek-ai/dsh-client-ui-session',
@@ -50,7 +51,7 @@ function readVirtualDom(node, predicate, found = []) {
 }
 
 /** Minimal hook scheduler runs the published browser bundle (including effects). */
-function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', initialPosition = null, simulateDom = false, initialGlobalModel = null, initialRepositoryModel = null, dshDefaultModel = null, fakeNow = null, catalogModels = [{provider:'mock',model:'m',providerName:'Mock',name:'M'}, {provider:'mock',model:'alt',providerName:'Mock',name:'Alt'}] } = {}) {
+function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', initialPosition = null, simulateDom = false, initialGlobalModel = null, initialRepositoryModel = null, dshDefaultModel = null, fakeNow = null, initialLocale = 'en', catalogModels = [{provider:'mock',model:'m',providerName:'Mock',name:'M'}, {provider:'mock',model:'alt',providerName:'Mock',name:'Alt'}] } = {}) {
   const sessions = { ids: ['one', 'two'], byId: {
     one: { id: 'one', cwd: '/example/repo-one' },
     two: { id: 'two', cwd: '/example/plain-directory' },
@@ -59,6 +60,28 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
   const saved = { globalInstruction: 'Global', model: initialGlobalModel, autoHideNonGit: initialHide, showTokenDetails: initialShowTokens, countdownColor: initialColor, floatingPosition:initialPosition };
   const repoConfig = { repositoryInstruction: 'Repository', inheritGlobal: true, repositoryModel: initialRepositoryModel };
   const calls = [];
+  const locale = {
+    snapshot: Object.freeze({active: initialLocale, revision: 0}),
+    listeners: new Set(), dictionaries: new Map(),
+    getSnapshot() { return this.snapshot; },
+    getLocale() { return this.snapshot; },
+    subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); },
+    register(ns, dictionaries) {
+      this.dictionaries.set(ns, dictionaries);
+      return () => { if (this.dictionaries.get(ns) === dictionaries) this.dictionaries.delete(ns); };
+    },
+    bind(ns) { return (key, params) => {
+      const dicts = this.dictionaries.get(ns);
+      const dict = dicts?.[this.snapshot.active] ?? dicts?.en ?? {};
+      const template = dict[key] ?? dicts?.en?.[key] ?? key;
+      return params ? template.replace(/\{(\w+)\}/g, (match, name) =>
+        name in params ? String(params[name]) : match) : template;
+    }; },
+    setLocale(active) {
+      this.snapshot = Object.freeze({active, revision: this.snapshot.revision + 1});
+      for (const listener of this.listeners) listener();
+    },
+  };
   let activeScope;
   const React = {
     createElement(type, props, ...children) { return { type, props: props ?? {}, children }; },
@@ -120,6 +143,7 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     assert.equal(name,'react');return React;
   });
   plugin.apply({
+    locale,
     effect: callback=>callback(),
     connection:{rpc:{call:async(_channel,_endpoint,{method,payload})=>{
       calls.push({method,payload});
@@ -193,7 +217,7 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     for(const listener of listeners.get('resize')??[]) listener();
   };
   const advanceTime = ms => {if (clockNow === null) throw new Error('fakeNow required'); clockNow += ms;};
-  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,resize,container,advanceTime};
+  return {sessions,selected,saved,repoConfig,calls,opened,definitions,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,resize,container,advanceTime,locale};
 }
 
 const matchButton = (name) => node=>node.type==='button' && node.props['aria-label']===name;
@@ -205,6 +229,55 @@ const switchTab = (render,scope,name) => {
   return render(scope);
 };
 const namedSelect = (dom,name) => readVirtualDom(dom,node=>node.type==='select' && node.props['aria-label']===name)[0];
+
+
+test('the floating panel and settings follow the DSH language live', async()=>{
+  const t=clientHarness();
+  const pill=t.mount('shell.overlay');
+  t.render(pill);await t.settle();t.render(pill);
+  const tab=t.mount('sidebar.right.pane.tab');
+  t.render(tab);await t.settle();
+  assert.equal(readVirtualDom(t.render(pill),matchButton('Commit settings')).length,1);
+  assert.equal(readVirtualDom(t.render(tab),matchButton('Repository')).length,1);
+  t.locale.setLocale('zh');
+  assert.equal(t.tabTypes.get('gitCommitSettings').title(),'Git 提交设置');
+  let floating=t.render(pill);
+  assert.equal(readVirtualDom(floating,matchButton('提交设置')).length,1);
+  assert.equal(readVirtualDom(floating,matchButton('暂存并提交所有更改')).length,1);
+  assert.equal(readVirtualDom(floating,matchButton('折叠 Git 提交浮窗')).length,1);
+  let page=t.render(tab);
+  assert.equal(readVirtualDom(page,matchButton('仓库')).length,1);
+  assert.match(textOf(page),/继承全局设置 \(Mock \/ M\)/);
+  assert.match(textOf(page),/仓库提交指令/);
+  page=switchTab(t.render,tab,'全局');
+  assert.match(textOf(page),/全局提交指令/);
+  assert.match(textOf(page),/在非 Git 项目中自动隐藏浮窗/);
+  assert.equal(readVirtualDom(page,matchButton('恢复浮窗默认位置')).length,1);
+  await readVirtualDom(floating,matchButton('暂存并提交所有更改'))[0].props.onClick();
+  floating=t.render(pill);
+  assert.match(textOf(floating),/已提交 e9f98bd/);
+  assert.match(textOf(floating),/feat\(ui\): show a commit summary/);
+  t.locale.setLocale('en');
+  assert.equal(t.tabTypes.get('gitCommitSettings').title(),'Git commit settings');
+  assert.equal(readVirtualDom(t.render(pill),matchButton('Commit settings')).length,1);
+  assert.match(textOf(t.render(pill)),/Committed e9f98bd/);
+  assert.equal(readVirtualDom(t.render(tab),matchButton('Global')).length,1);
+  t.unmount(tab);t.unmount(pill);
+});
+
+test('Simplified Chinese is DSH zh and unprovided languages fall back to English', async()=>{
+  const t=clientHarness({initial:'two',initialLocale:'zh'});
+  const pill=t.mount('shell.overlay');
+  t.render(pill);await t.settle();
+  assert.match(textOf(t.render(pill)),/当前目录不是 Git 仓库/);
+  const tab=t.mount('sidebar.right.pane.tab');
+  t.render(tab);await t.settle();t.render(tab);
+  assert.match(textOf(t.render(tab)),/全局提交指令/);
+  t.locale.setLocale('ja');
+  assert.match(textOf(t.render(pill)),/Not a git repository/);
+  assert.match(textOf(t.render(tab)),/Global commit instruction/);
+  t.unmount(tab);t.unmount(pill);
+});
 
 test('initial empty Session does not crash the global overlay; navigating to a repository activates it',async()=>{
   // In DSH the root shell mounts before a Session is selected. Previously,
