@@ -254,7 +254,10 @@ test('the floating panel and settings follow the DSH language live', async()=>{
   page=switchTab(t.render,tab,'全局');
   assert.match(textOf(page),/全局提交指令/);
   assert.match(textOf(page),/在非 Git 项目中自动隐藏浮窗/);
-  assert.equal(readVirtualDom(page,matchButton('恢复浮窗默认位置')).length,1);
+  assert.equal(readVirtualDom(page,matchButton('恢复浮窗默认位置')).length,0);
+  const detail=t.mount('plugins.bundle.config');
+  assert.equal(readVirtualDom(t.render(detail,{view:'page'}),
+    matchButton('恢复浮窗默认位置')).length,1);
   await readVirtualDom(floating,matchButton('暂存并提交所有更改'))[0].props.onClick();
   floating=t.render(pill);
   assert.match(textOf(floating),/已提交 e9f98bd/);
@@ -264,7 +267,9 @@ test('the floating panel and settings follow the DSH language live', async()=>{
   assert.equal(readVirtualDom(t.render(pill),matchButton('Commit settings')).length,1);
   assert.match(textOf(t.render(pill)),/Committed e9f98bd/);
   assert.equal(readVirtualDom(t.render(tab),matchButton('Global')).length,1);
-  t.unmount(tab);t.unmount(pill);
+  assert.equal(readVirtualDom(t.render(detail,{view:'page'}),
+    matchButton('Reset floating window position')).length,1);
+  t.unmount(detail);t.unmount(tab);t.unmount(pill);
 });
 
 test('Simplified Chinese is DSH zh and unprovided languages fall back to English', async()=>{
