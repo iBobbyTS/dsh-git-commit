@@ -28,6 +28,23 @@ test('DSH boot graph can materialize the Client under its exact npm package iden
     `DSH expects __ModuleLoader__.load to register ${manifest.name}, not an unscoped alias`);
 });
 
+test('Client injects every service it reads from ctx', () => {
+  // DSH 0.2.1-rc.3 hard-fails activation with "cannot get property <name>
+  // without inject" when apply() touches a service missing from the plugin's
+  // inject list. Reading ctx.locale without declaring it took the whole Web
+  // boot down, so the list is derived from the bundle's actual reads.
+  const source = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8');
+  const registrations = [];
+  runInNewContext(source, {
+    window: { __ModuleLoader__: { load: (entry) => registrations.push(entry) } },
+  });
+  const plugin = registrations[0].factory(() => ({ createElement() {} }));
+  const read = new Set([...source.matchAll(/\bctx\.([A-Za-z_$][\w$]*)/g)].map((match) => match[1]));
+  read.delete('effect'); // Cordis context method, not an injected service.
+  assert.deepEqual([...read].sort(), [...plugin.inject].sort(),
+    'every ctx service must be declared in the plugin inject list');
+});
+
 test('Client loader declares only real DSH package dependencies', () => {
   assert.equal(manifest.name, '@ibobbyts/dsh-git-commit');
   assert.equal(manifest.dsh.client.platform, 'web');
