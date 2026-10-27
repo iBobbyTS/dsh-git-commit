@@ -1,0 +1,16 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M11 10V18.5A6 6 0 0 0 17 24.5H19.5" stroke="url(#dgc-branch)" stroke-width="2.8" stroke-linecap="round" />
+  <circle cx="11" cy="7" r="3" fill="#7CB7FF" />
+  <circle cx="26" cy="25.5" r="7" fill="url(#dgc-done)" />
+  <path d="M22.6 25.8L24.9 28.1L29.5 23.1" stroke="#FFFFFF" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" />
+  <defs>
+    <linearGradient id="dgc-branch" x1="11" y1="10" x2="20" y2="25" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7CB7FF" />
+      <stop offset="1" stop-color="#3650DE" />
+    </linearGradient>
+    <linearGradient id="dgc-done" x1="19" y1="18.5" x2="33" y2="32.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8CB78" />
+      <stop offset="1" stop-color="#D97706" />
+    </linearGradient>
+  </defs>
+</svg>

@@ -17,6 +17,27 @@ test('npm package name, host bundle patch and published entries match scoped ide
   assert.match(source('README.md'),/ctx\.gitCommit\.commit\(\{ cwd \}\)/);
 });
 
+test('bundle display metadata ships localized titles and an original icon',()=>{
+  assert.equal(pkg.icon,'./icon.svg');
+  assert.equal(pkg.exports['./locale/*.json'],'./locale/*.json');
+  assert.ok(pkg.files.includes('locale/*.json'));
+  assert.ok(pkg.files.includes('icon.svg'));
+  const en=JSON.parse(source('locale/en.json')).meta;
+  const zh=JSON.parse(source('locale/zh.json')).meta;
+  for (const meta of [en,zh]) {
+    assert.equal(typeof meta.title,'string');
+    assert.ok(meta.title.trim().length>0);
+    assert.equal(typeof meta.description,'string');
+    assert.ok(meta.description.trim().length>0);
+  }
+  assert.notEqual(zh.title,en.title);
+  assert.match(zh.title,/[\u4e00-\u9fff]/);
+  const icon=source('icon.svg');
+  assert.match(icon,/^<svg[\s>]/);
+  assert.match(icon,/viewBox="0 0 36 36"/);
+  assert.ok(Buffer.byteLength(icon)<=256*1024);
+});
+
 test('npm release workflow is tag gated, OIDC-only and safe on manual dispatch',()=>{
   const release=source('.github/workflows/npm-publish.yml');
   const ci=source('.github/workflows/ci.yml');
