@@ -76,6 +76,13 @@ export interface GitCommitApi {
 declare module '@deepseek-ai/cordis' {
   interface Context { gitCommit: GitCommitApi; }
 }
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** Commit notice injected into the requesting Session's inbox; never user speech. */
+    'git-commit': { kind: 'git-commit'; form: 'notice'; summary: string };
+  }
+}
 export const name: string;
 export const inject: string[];
-export function apply(ctx: import('@deepseek-ai/cordis').Context): void;
+/** `notifyModel: false` disables the model-visible commit notice. */
+export function apply(ctx: import('@deepseek-ai/cordis').Context, config?: { notifyModel?: boolean }): void;

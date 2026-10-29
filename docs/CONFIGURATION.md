@@ -29,6 +29,17 @@ The initial position is `right: 24px; bottom: 98px`. Each completed drag and aut
 
 For non-Git directories the expanded panel says **Not a git repository** and has a fold button. In the compact state the Git icon has a red cross. Neither state allows committing or opening settings. With automatic hiding enabled, neither state is shown.
 
+## Model notices
+
+After a successful commit the model is told, through the Session's Agent inbox, that those changes are committed (see [Architecture](ARCHITECTURE.md#model-visible-commit-notice)). It appears in Chat as a `git-commit` context row and never as your own message. Turn it off for a profile in `cordis.patch.yml`:
+
+```yaml
+- id: dsh-git-commit
+  name: '@ibobbyts/dsh-git-commit'
+  config:
+    notifyModel: false
+```
+
 ## Language
 
 The plugin follows DSH's Client locale service (`@deepseek-ai/dsh-client-locale`) automatically. It provides Simplified Chinese (`zh`) and English (`en`) dictionaries. Changing **DSH Settings → General → Language** updates the plugin's floating panel and settings page without a reload. Other DSH languages fall back to English. There is no separate plugin language setting, and the Git commit message/model output is not translated.

@@ -29,6 +29,16 @@ If anything is staged, the plugin commits **only the staged Git index**. If noth
 
 Small Diff: one LLM call. When a file has over 2,000 changed lines: one low-reasoning classification call (all paths and large-file previews), then one final generation call (Off reasoning when supported). Total **at most two LLM calls**. Large-file previews are explicitly marked; inputs are best-effort credential-redacted before transmission. See [Architecture](docs/ARCHITECTURE.md).
 
+## Model notification
+
+A commit requested by a Session also tells the model that those changes are committed, so it does not commit them again. The notice enters the Session's Agent inbox through `agent.inject()`:
+
+- A **running** Agent sees it at its next step boundary.
+- An **idle** Agent keeps it pending until your next message, and the inbox claim order places the notice *before* that message.
+- It never wakes the Agent by itself, so an idle Session stays idle.
+
+Chat renders the notice as a `git-commit` context row (one-line summary, expandable), never as your own message. An undelivered notice survives a restart and is re-sent when the Session reopens, provided `HEAD` still points at that commit; it is dropped as stale otherwise. Disable it in `cordis.patch.yml` with `config: { notifyModel: false }`.
+
 ## Call the Git commit service from another DSH Host plugin
 
 `@ibobbyts/dsh-git-commit` exposes a **Cordis-native Host service**. Declare `gitCommit` in your plugin's injection list. No separate MCP server or browser RPC is required:

@@ -15,6 +15,17 @@
 
 The plugin does not fetch, push, amend, reset refs, or stage ignored files. Simultaneous plugin commits for the same repository share one in-flight operation and result.
 
+## Model-visible commit notice
+
+A successful commit that carries a Session id also injects one `user/message` into that Session's Agent inbox, so a model that asked for the commit does not commit the same changes again.
+
+- Delivery uses `agent.inject()`. It writes an `agent/inbox/spliced` event for the `next-step` queue and never wakes the driver: a running Agent claims it at its next step boundary, and an idle Agent leaves it pending.
+- `claim()` returns the `next-step` batch before the queued turn, so the notice precedes the user's next message in the same step. Chat renders it as a context row from its source kind, never as user speech.
+- The message source is `{ kind: 'git-commit', form: 'notice', summary }`; `summary` is bounded to one line for the collapsed row.
+- Pending notices are recorded per Session in `$DSH_HOME/dsh-git-commit-notices.json` because a graceful Agent dispose durably clears its inbox. The `user/message` append retires the record once the model has the message — a claimed batch can still be rejected or cancelled before it enters a request — and `agent/inbox/discarded` retires it when the harness drops the queued input. `agent/created` replays an undelivered notice after a restart, skipping a message that survived in the rebuilt inbox and dropping the notice when `HEAD` no longer starts with the recorded hash. Entries expire after seven days and the file is capped at 100 Sessions.
+- A second commit replaces the Session's pending notice and removes the superseded row from the inbox first, so the model never receives two "already committed" rows.
+- All of this is advisory: notice failures are logged and never turn a completed commit into a failed result.
+
 ## LLM context routing (at most two calls)
 
 The plugin builds a complete file inventory and parses each unified Diff file section. When every file has at most **2,000 changed lines**, it makes one generation call. Otherwise, it makes one classification call with every path/stat and the first 200 lines of each large file's Diff. A strictly parsed model decision determines which large files need full Diff. Non-selected large files still contribute an explicitly marked **truncated 200-line preview** to the final generation input. Missing/invalid decisions fall back to full Diff. Pathological or oversized inputs fail explicitly rather than quietly dropping files.

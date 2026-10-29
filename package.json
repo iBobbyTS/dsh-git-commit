@@ -43,7 +43,7 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "node --check lib/index.js && node --check lib/client.js && node --test test/*.test.js",
+    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/core/notice.js && node --test test/*.test.js",
     "prepublishOnly": "npm run check"
   },
   "dependencies": {

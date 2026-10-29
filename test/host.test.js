@@ -11,9 +11,11 @@ test('Host mounts on the authenticated /api Fetch seam without webServer', async
   const services = [];
   const effects = [];
   const routes = [];
+  const listeners = [];
   const ctx = {
     reflect: { provide: (name, service) => { services.push({ name, service }); return () => {}; } },
     effect: (factory) => { effects.push(factory); return () => {}; },
+    on: (event, listener) => { listeners.push({ event, listener }); return () => {}; },
     get webServer() { throw new Error('cannot get property "webServer" without inject'); },
     connection: {
       rpc: { handle: () => { throw new Error('RPC handle is not suitable for an external DSH plugin'); } },
@@ -24,6 +26,8 @@ test('Host mounts on the authenticated /api Fetch seam without webServer', async
   };
   assert.deepEqual(inject, ['connection', 'llm']);
   apply(ctx);
+  // The two model-notice feeds are mounted on the plugin context and disposed with it.
+  assert.deepEqual(listeners.map(entry => entry.event), ['agent/created', 'session/event', 'agent/inbox/discarded']);
   // Real Cordis effects execute their factories as part of registration.
   const cleanups = effects.map(factory => factory());
   assert.equal(services[0].name, 'gitCommit');
@@ -122,4 +126,21 @@ test('large Diff routes through exactly one classification call and one final ge
   assert.doesNotMatch(calls[1].prompt, /\+const credential=secret-for-redaction/);
   assert.ok(calls.every(call => !call.prompt.includes('secret-for-redaction')));
   assert.ok(calls[1].prompt.includes('ALTER TABLE db ADD column7 TEXT'));
+});
+
+test('a profile can opt out of model notices without losing the Host service', () => {
+  const services = [];
+  const listeners = [];
+  const ctx = {
+    reflect: { provide: (name, service) => { services.push({ name, service }); return () => {}; } },
+    effect: () => () => {},
+    on: (event, listener) => { listeners.push({ event, listener }); return () => {}; },
+    connection: { fetch: { register: () => async () => {} } },
+    get: () => undefined,
+    llm: { listProviders: () => [], listModels: async () => [] },
+  };
+  apply(ctx, { notifyModel: false });
+  assert.equal(services[0].name, 'gitCommit');
+  assert.deepEqual(listeners, []);
+  assert.equal(services[0].service.notifier, null);
 });
