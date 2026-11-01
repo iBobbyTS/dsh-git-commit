@@ -66,6 +66,8 @@ export interface GitActionResult {
   error?: string;
   message?: string;
   branch?: string;
+  /** Successful push where every reported remote ref was already current. */
+  upToDate?: boolean;
   source?: string | null;
   target?: string | null;
   stage?: 'preflight' | 'switch' | 'merge' | 'delete' | 'done';

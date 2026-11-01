@@ -877,6 +877,8 @@ test('push follows commit, merge uses a single dual-icon button, and all three t
   dom=t.render(pill);
   assert.equal(readVirtualDom(dom,n=>n.props?.role==='progressbar').length,2);
   assert.equal(readVirtualDom(dom,n=>n.type==='hr').length,1);
+  const pushMessage=readVirtualDom(dom,n=>n.type==='div' && textOf(n)==='Push succeeded')[0];
+  assert.equal(pushMessage.props.className,'dgc-result-subject','push success reuses the commit message style');
   t.advanceTime(2000);
   await readVirtualDom(dom,matchButton('Merge and delete branch'))[0].props.onClick();
   dom=t.render(pill);
@@ -892,6 +894,20 @@ test('push follows commit, merge uses a single dual-icon button, and all three t
   assert.doesNotMatch(textOf(dom),/Push succeeded/);
   assert.match(textOf(dom),/Merged feature\/actions/);
   assert.equal(readVirtualDom(dom,n=>n.type==='hr').length,0);
+  t.unmount(pill);
+});
+
+test('already-current push shows its own localized message with commit-message style and countdown', async () => {
+  const t=clientHarness({actionResults:{push:{success:true,upToDate:true}}});
+  const pill=t.mount('shell.overlay');t.render(pill);await t.settle();t.render(pill);
+  await readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0].props.onClick();
+  await readVirtualDom(t.render(pill),matchButton('Push commits'))[0].props.onClick();
+  let dom=t.render(pill);
+  assert.doesNotMatch(textOf(dom),/Push succeeded/);
+  assert.equal(readVirtualDom(dom,n=>n.props?.className==='dgc-result-subject' && textOf(n)==='Already up to date').length,1);
+  assert.equal(readVirtualDom(dom,n=>n.props?.role==='progressbar').length,2);
+  t.locale.setLocale('zh');dom=t.render(pill);
+  assert.match(textOf(dom),/已是最新，无需推送/);
   t.unmount(pill);
 });
 

@@ -118,6 +118,10 @@ test('unfinished Git operations prevent switch and push', () => fixture(async ro
 test('push establishes upstream and rejects remote refusal without force', () => fixture(async (root, remote) => {
   const result = await pushBranch(root);
   assert.equal(result.success, true, result.error);
+  assert.equal(result.upToDate, false, 'creating a remote branch is an actual push');
+  const repeated = await pushBranch(root);
+  assert.equal(repeated.success, true, repeated.error);
+  assert.equal(repeated.upToDate, true, 'an unchanged second push reports already up to date');
   assert.equal((await git(root, ['rev-parse', '--abbrev-ref', '@{upstream}'])).trim(), 'origin/feature/actions');
   assert.equal((await git(remote, ['rev-parse', 'refs/heads/feature/actions'])).trim(), (await git(root, ['rev-parse', 'HEAD'])).trim());
   await git(remote, ['config', 'receive.denyNonFastForwards', 'true']);
