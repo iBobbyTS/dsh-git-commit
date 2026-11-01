@@ -885,6 +885,10 @@ test('push follows commit, merge uses a single dual-icon button, and all three t
   assert.equal(readVirtualDom(dom,n=>n.props?.role==='progressbar').length,3);
   assert.equal(readVirtualDom(dom,n=>n.type==='hr').length,2);
   assert.match(textOf(dom),/Merged feature\/actions into trunk/);
+  const mergeMessage=readVirtualDom(dom,n=>n.props?.className==='dgc-result-subject dgc-result-subject-wrap')[0];
+  assert.match(textOf(mergeMessage),/Merged feature\/actions into trunk/);
+  assert.match(t.styleTags[0].textContent,/\.dgc-result-subject-wrap\{white-space:normal;overflow:visible;text-overflow:clip\}/,
+    'merge success shares the push typography with only a wrapping override');
   t.fireFirstExpiry();dom=t.render(pill);
   assert.doesNotMatch(textOf(dom),/Committed e9f98bd/);
   assert.match(textOf(dom),/Push succeeded/);
