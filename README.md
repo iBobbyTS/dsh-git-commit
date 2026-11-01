@@ -43,7 +43,7 @@ A commit requested by a Session also tells the model that those changes are comm
 - An **idle** Agent keeps it pending until your next message, and the inbox claim order places the notice *before* that message.
 - It never wakes the Agent by itself, so an idle Session stays idle.
 
-Chat renders the notice as a `git-commit` context row (one-line summary, expandable), never as your own message. An undelivered notice survives a restart and is re-sent when the Session reopens, provided `HEAD` still points at that commit; it is dropped as stale otherwise. Disable it in `cordis.patch.yml` with `config: { notifyModel: false }`.
+The notice is model-facing only: Chat shows user, assistant, and tool rows, so the injected context adds **no transcript row**, and it never appears as your own message. It stays inspectable in the Session log and the **Trajectory** view. Delivery requires the requesting Session id, which the floating panel sends with every commit. An undelivered notice survives a restart and is re-sent when the Session reopens, provided `HEAD` still points at that commit; it is dropped as stale otherwise. Disable it in `cordis.patch.yml` with `config: { notifyModel: false }`.
 
 ## Call the Git commit service from another DSH Host plugin
 

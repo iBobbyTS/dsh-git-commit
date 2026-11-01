@@ -31,7 +31,7 @@ For non-Git directories the expanded panel says **Not a git repository** and has
 
 ## Model notices
 
-After a successful commit the model is told, through the Session's Agent inbox, that those changes are committed (see [Architecture](ARCHITECTURE.md#model-visible-commit-notice)). It appears in Chat as a `git-commit` context row and never as your own message. Turn it off for a profile in `cordis.patch.yml`:
+After a successful commit the model is told, through the Session's Agent inbox, that those changes are committed (see [Architecture](ARCHITECTURE.md#model-visible-commit-notice)). The notice is model-facing only: it adds no Chat transcript row and never appears as your own message; it stays inspectable in the Session log and the Trajectory view. Turn it off for a profile in `cordis.patch.yml`:
 
 ```yaml
 - id: dsh-git-commit

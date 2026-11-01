@@ -632,6 +632,11 @@ test('successful commit shows only monospaced summary, ordinary-font subject, op
   t.render(pill);await t.settle();t.render(pill);
   const button=readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0];
   await button.props.onClick();
+  // The Host cannot address the Agent inbox without the Session; a payload of
+  // {cwd} alone silently drops the model-visible commit notice.
+  const commitCall=t.calls.find(call=>call.method==='commit');
+  assert.equal(commitCall.payload.sessionId,'one','the Host addresses the Agent inbox by Session id');
+  assert.equal(commitCall.payload.cwd,'/example/repo-one');
   const shown=t.render(pill);
   const head=readVirtualDom(shown,n=>n.props?.className==='dgc-result-head');
   const subject=readVirtualDom(shown,n=>n.props?.className==='dgc-result-subject');
