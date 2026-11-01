@@ -25,7 +25,13 @@ Alternatively, in **Plugins → Add plugin → Install third-party plugin**, use
 
 ## How commits work
 
-If anything is staged, the plugin commits **only the staged Git index**. If nothing is staged, it snapshots all non-ignored worktree changes, generates a message, revalidates the snapshot, stages, and commits them. It never pushes or bypasses Git hooks. A changed snapshot fails safely instead of committing uninspected content.
+If anything is staged, the plugin commits **only the staged Git index**. If nothing is staged, it snapshots all non-ignored worktree changes, generates a message, revalidates the snapshot, stages, and commits them. Committing never pushes automatically or bypasses Git hooks. A changed snapshot fails safely instead of committing uninspected content.
+
+After a successful commit, a **Push** button appears immediately to the right of Commit. It performs a normal (never force) push; a branch without an upstream establishes `origin/<same-name>` as upstream. Push success and failure get their own ten-second notification, independent of the commit countdown.
+
+On a non-default branch (excluding `main` and detached HEAD), a single **Merge and delete** button contains both merge and delete icons. It resolves the default branch using `git symbolic-ref --short refs/remotes/origin/HEAD` and removes only the leading `origin/`. With a clean index/worktree, it switches to that **existing local branch**, merges the source, then safely deletes the **local source branch** with `git branch -d`. No fetch, pull, remote deletion or push is implicit. Missing default/local target or an unfinished Git operation refuses the action. Conflicts leave the source branch intact and the target's conflict state available for inspection; a deletion failure reports failure without undoing a completed merge.
+
+Commit, Push and Merge results have independent countdowns, separated by horizontal dividers. Hovering the card pauses each countdown at its own remaining duration. The Push button remains available after a merge so you can explicitly push the local default branch.
 
 Small Diff: one LLM call. When a file has over 2,000 changed lines: one low-reasoning classification call (all paths and large-file previews), then one final generation call (Off reasoning when supported). Total **at most two LLM calls**. Large-file previews are explicitly marked; inputs are best-effort credential-redacted before transmission. See [Architecture](docs/ARCHITECTURE.md).
 

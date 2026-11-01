@@ -68,7 +68,7 @@ function readVirtualDom(node, predicate, found = []) {
 }
 
 /** Minimal hook scheduler runs the published browser bundle (including effects). */
-function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', initialPosition = null, simulateDom = false, initialGlobalModel = null, initialRepositoryModel = null, dshDefaultModel = null, fakeNow = null, initialLocale = 'en', catalogModels = [{provider:'mock',model:'m',providerName:'Mock',name:'M'}, {provider:'mock',model:'alt',providerName:'Mock',name:'Alt'}] } = {}) {
+function clientHarness({ initial = 'one', failSave = false, initialHide = false, initialShowTokens = false, initialColor = '#f59e0b', branchName = 'main', defaultBranch = 'main', actionResults = {}, initialPosition = null, simulateDom = false, initialGlobalModel = null, initialRepositoryModel = null, dshDefaultModel = null, fakeNow = null, initialLocale = 'en', catalogModels = [{provider:'mock',model:'m',providerName:'Mock',name:'M'}, {provider:'mock',model:'alt',providerName:'Mock',name:'Alt'}] } = {}) {
   const sessions = { ids: ['one', 'two'], byId: {
     one: { id: 'one', cwd: '/example/repo-one' },
     two: { id: 'two', cwd: '/example/plain-directory' },
@@ -167,7 +167,7 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
       let value;
       if(method==='changeToken') value={token:payload.cwd.includes('repo-one') ? 1 : null};
       else if(method==='status')value=payload.cwd.includes('repo-one')
-        ? {isRepository:true,root:'/example/repo-one',branch:branchName,additions:268,deletions:141,stagedFiles:0,untracked:0,binary:0}
+        ? {isRepository:true,root:'/example/repo-one',branch:branchName,defaultBranch,canMergeAndDelete:!!defaultBranch&&branchName!==defaultBranch&&branchName!=='main',additions:268,deletions:141,stagedFiles:0,untracked:0,binary:0}
         : {isRepository:false,root:null};
       else if(method==='settings')value=payload.cwd.includes('repo-one')
         ? {...saved,...repoConfig,isRepository:true,root:'/example/repo-one'}
@@ -189,6 +189,10 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
         llm:{calls:3,inputTokens:12450,outputTokens:680,cacheReadTokens:8000,
           cacheWriteTokens:100,latencyMs:710,outputSpeedTps:91.2,durationMs:4100},
       };
+      else if (method === 'push' || method === 'mergeAndDelete') {
+        const response = actionResults[method];
+        value = typeof response === 'function' ? await response() : response ?? { success: true, source: branchName, target: defaultBranch };
+      }
       else throw new Error(`Unexpected RPC ${method}`);
       return {ok:true,value};
     } }},
@@ -229,6 +233,7 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
   function unmount(scope){for(const slot of scope.hooks)if(typeof slot?.cleanup==='function')slot.cleanup();}
   const settle=()=>new Promise(resolve=>setImmediate(resolve));
   const fireExpiry=()=>{const current=[...expiries.values()];expiries.clear();current.forEach(fn=>fn());};
+  const fireFirstExpiry=()=>{const first=expiries.entries().next().value;if(first){expiries.delete(first[0]);first[1]();}};
   const resize=(width,height,rootOffset={})=>{
     container.clientWidth=width;container.clientHeight=height;
     window.innerWidth=width;window.innerHeight=height;
@@ -236,7 +241,7 @@ function clientHarness({ initial = 'one', failSave = false, initialHide = false,
     for(const listener of listeners.get('resize')??[]) listener();
   };
   const advanceTime = ms => {if (clockNow === null) throw new Error('fakeNow required'); clockNow += ms;};
-  return {sessions,selected,saved,repoConfig,calls,opened,definitions,slotEntries,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,resize,container,advanceTime,locale};
+  return {sessions,selected,saved,repoConfig,calls,opened,definitions,slotEntries,tabTypes,styleTags,mount,render,unmount,settle,fireExpiry,fireFirstExpiry,resize,container,advanceTime,locale};
 }
 
 const matchButton = (name) => node=>node.type==='button' && node.props['aria-label']===name;
@@ -853,4 +858,85 @@ test('saved position hydrates on next mount; resize snaps inside viewport and re
   dom=t.render(pill);
   assert.ok(dom.props.style.top>=6,'default is re-clamped if it does not fit');
   t.unmount(pill);t.unmount(settings);t.unmount(detail);
+});
+
+test('push follows commit, merge uses a single dual-icon button, and all three timers are independent', async () => {
+  const t = clientHarness({branchName:'feature/actions',defaultBranch:'trunk',fakeNow:100000});
+  const pill = t.mount('shell.overlay');t.render(pill);await t.settle();
+  let dom = t.render(pill);
+  assert.equal(readVirtualDom(dom,matchButton('Push commits')).length,0);
+  const merge = readVirtualDom(dom,matchButton('Merge and delete branch'))[0];
+  assert.equal(readVirtualDom(merge,n=>n.type==='svg').length,2);
+  await readVirtualDom(dom,matchButton('Stage and commit all changes'))[0].props.onClick();
+  dom=t.render(pill);
+  const actions=readVirtualDom(dom,n=>n.props?.className==='dgc-line dgc-actions')[0];
+  assert.deepEqual(readVirtualDom(actions,n=>n.type==='button').map(n=>n.props['aria-label']),
+    ['Stage and commit all changes','Push commits','Merge and delete branch','Commit settings']);
+  t.advanceTime(2000);
+  await readVirtualDom(dom,matchButton('Push commits'))[0].props.onClick();
+  dom=t.render(pill);
+  assert.equal(readVirtualDom(dom,n=>n.props?.role==='progressbar').length,2);
+  assert.equal(readVirtualDom(dom,n=>n.type==='hr').length,1);
+  t.advanceTime(2000);
+  await readVirtualDom(dom,matchButton('Merge and delete branch'))[0].props.onClick();
+  dom=t.render(pill);
+  assert.equal(readVirtualDom(dom,n=>n.props?.role==='progressbar').length,3);
+  assert.equal(readVirtualDom(dom,n=>n.type==='hr').length,2);
+  assert.match(textOf(dom),/Merged feature\/actions into trunk/);
+  t.fireFirstExpiry();dom=t.render(pill);
+  assert.doesNotMatch(textOf(dom),/Committed e9f98bd/);
+  assert.match(textOf(dom),/Push succeeded/);
+  assert.equal(readVirtualDom(dom,n=>n.props?.role==='progressbar').length,2);
+  assert.equal(readVirtualDom(dom,n=>n.type==='hr').length,1);
+  t.fireFirstExpiry();dom=t.render(pill);
+  assert.doesNotMatch(textOf(dom),/Push succeeded/);
+  assert.match(textOf(dom),/Merged feature\/actions/);
+  assert.equal(readVirtualDom(dom,n=>n.type==='hr').length,0);
+  t.unmount(pill);
+});
+
+test('push and merge failures have separate timed alerts without clearing the commit result', async () => {
+  const t=clientHarness({branchName:'feature/actions',actionResults:{
+    push:{success:false,error:'remote rejected'},mergeAndDelete:{success:false,error:'merge conflict; source retained'},
+  }});
+  const pill=t.mount('shell.overlay');t.render(pill);await t.settle();t.render(pill);
+  await readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0].props.onClick();
+  await readVirtualDom(t.render(pill),matchButton('Push commits'))[0].props.onClick();
+  await readVirtualDom(t.render(pill),matchButton('Merge and delete branch'))[0].props.onClick();
+  let dom=t.render(pill);
+  assert.match(textOf(dom),/Committed e9f98bd/);
+  assert.match(textOf(dom),/Push failed: remote rejected/);
+  assert.match(textOf(dom),/Merge and delete failed: merge conflict/);
+  assert.equal(readVirtualDom(dom,n=>n.props?.role==='alert').length,2);
+  assert.equal(readVirtualDom(dom,n=>n.props?.role==='progressbar').length,3);
+  const card=readVirtualDom(dom,n=>n.props?.className==='dgc-card')[0];
+  card.props.onMouseEnter();dom=t.render(pill);
+  assert.ok(readVirtualDom(dom,n=>n.props?.className==='dgc-countdown-fill').every(n=>n.props.style.animationPlayState==='paused'));
+  t.fireExpiry();assert.equal(readVirtualDom(t.render(pill),n=>n.props?.role==='progressbar').length,3);
+  card.props.onMouseLeave();t.render(pill);t.fireExpiry();
+  assert.equal(readVirtualDom(t.render(pill),n=>n.props?.role==='progressbar').length,0);
+  t.unmount(pill);
+});
+
+test('default branches hide merge action and late follow-up responses do not leak into another session', async () => {
+  for (const name of ['main','master','trunk']) {
+    const t=clientHarness({branchName:name,defaultBranch:name});
+    const pill=t.mount('shell.overlay');t.render(pill);await t.settle();
+    assert.equal(readVirtualDom(t.render(pill),matchButton('Merge and delete branch')).length,0);
+    t.unmount(pill);
+  }
+  let release;
+  const t=clientHarness({actionResults:{push:()=>new Promise(resolve=>{release=resolve;})}});
+  const pill=t.mount('shell.overlay');t.render(pill);await t.settle();t.render(pill);
+  await readVirtualDom(t.render(pill),matchButton('Stage and commit all changes'))[0].props.onClick();
+  const push=readVirtualDom(t.render(pill),matchButton('Push commits'))[0];
+  const pending=push.props.onClick();
+  const duplicate=push.props.onClick();await duplicate;
+  assert.equal(t.calls.filter(c=>c.method==='push').length,1);
+  assert.equal(readVirtualDom(t.render(pill),matchButton('Pushing…'))[0].props.disabled,true);
+  t.selected.value='two';t.render(pill);await t.settle();
+  release({success:true});await pending;t.render(pill);
+  t.selected.value='one';t.render(pill);await t.settle();
+  assert.doesNotMatch(textOf(t.render(pill)),/Push succeeded/);
+  t.unmount(pill);
 });

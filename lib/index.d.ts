@@ -60,11 +60,27 @@ export interface GitCommitSettings {
   /** Canonical Git root, or null outside a repository. */
   root: string | null;
 }
+export interface GitActionResult {
+  success: boolean;
+  status: 'success' | 'failure';
+  error?: string;
+  message?: string;
+  branch?: string;
+  source?: string | null;
+  target?: string | null;
+  stage?: 'preflight' | 'switch' | 'merge' | 'delete' | 'done';
+  merged?: boolean;
+  deleted?: boolean;
+}
 export interface GitCommitApi {
+  /** Normal push; a new branch establishes origin/<same-name> as upstream. Never force pushes. */
+  push(request: GitCommitRequest): Promise<GitActionResult>;
+  /** Switch to the local origin/HEAD default, merge, then safely delete the local source. */
+  mergeAndDelete(request: GitCommitRequest): Promise<GitActionResult>;
   commit(request: GitCommitRequest): Promise<GitCommitResult>;
   status(request: GitCommitRequest): Promise<
     | { isRepository: false; root: null }
-    | { isRepository: true; root: string; repo: string; branch: string; head: string;
+    | { isRepository: true; root: string; repo: string; branch: string; head: string; defaultBranch: string | null; canMergeAndDelete: boolean;
         additions: number; deletions: number; binary: number;
         untracked: number; unknownUntrackedLines: number; stagedFiles: number }
   >;
