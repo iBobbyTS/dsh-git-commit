@@ -34,6 +34,8 @@ The plugin builds a complete file inventory and parses each unified Diff file se
 
 The classifier prefers the lowest **non-Off** reasoning level (Off only when the model offers nothing else); final generation prefers Off, falling back to the lowest supported effort.
 
+Both calls forward the requesting Session id as `GenerateOptions.sessionId`: Session-keyed provider routes reuse it for request routing and prompt caching, and OpenCode rejects a call without its `x-opencode-session` header (400 `MissingSessionID`). A commit requested without a Session (for example by another Host plugin passing only `cwd`) sends no Session metadata, exactly like any other Session-less one-shot call.
+
 Both model inputs are best-effort redacted with `@visulima/redact` credential rules. Redaction is *not* a guarantee against every secret or sensitive source path. The real Git snapshot is never modified by prompt redaction. Review changes and avoid staging credentials before committing.
 
 If the Diff exceeds the provider's safe request budget even after selection, the plugin returns an explicit failure; it never launches unbounded Map-Reduce requests.

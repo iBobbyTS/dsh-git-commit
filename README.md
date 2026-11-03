@@ -33,7 +33,7 @@ On a non-default branch (excluding `main` and detached HEAD), a single **Merge a
 
 Commit, Push and Merge results have independent countdowns, separated by horizontal dividers. Hovering the card pauses each countdown at its own remaining duration. The Push button remains available after a merge so you can explicitly push the local default branch.
 
-Small Diff: one LLM call. When a file has over 2,000 changed lines: one low-reasoning classification call (all paths and large-file previews), then one final generation call (Off reasoning when supported). Total **at most two LLM calls**. Large-file previews are explicitly marked; inputs are best-effort credential-redacted before transmission. See [Architecture](docs/ARCHITECTURE.md).
+Small Diff: one LLM call. When a file has over 2,000 changed lines: one low-reasoning classification call (all paths and large-file previews), then one final generation call (Off reasoning when supported). Total **at most two LLM calls**. Large-file previews are explicitly marked; inputs are best-effort credential-redacted before transmission. Both calls carry the requesting Session id as model-hidden routing metadata, so Session-keyed provider routes (such as OpenCode's required Session header) behave as they do in a normal Agent conversation. See [Architecture](docs/ARCHITECTURE.md).
 
 ## Model notification
 

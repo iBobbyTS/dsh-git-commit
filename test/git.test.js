@@ -121,6 +121,36 @@ test('programmatic API generates model message and responds with requested contr
   service.close(); service2.close();
 }));
 
+test('generation requests carry the requesting Session id as routing metadata',async()=>fixture(async root=>{
+  // OpenCode-style routes reject a request that omits their Session header
+  // (400 MissingSessionID); the loop's own calls pass GenerateOptions.sessionId.
+  const seen=[];
+  const text='chore: route generation through the session';
+  const llm={listProviders:()=>[{id:'mock',name:'Mock'}],
+    listModels:async()=>[{provider:'mock',id:'m1',name:'M1'}],
+    resolveModelInfo:async()=>({reasoning:{efforts:[{id:'off'}]}}),
+    async *stream(options){
+      seen.push(options);
+      yield {type:'block-start',index:0,blockType:'text'};
+      yield {type:'text-delta',index:0,text};
+      yield {type:'block-end',index:0,block:{type:'text',text}};
+      yield {type:'finish',reason:'stop'};
+    }};
+  const store=new InstructionStore(join(root,'.git','settings-routing.json'));
+  const service=new GitCommitService({llm,get:()=>undefined},{store,notifier:null});
+  try{
+    await writeFile(join(root,'a.txt'),'one\nfirst\n');
+    const withSession=await service.commit({cwd:root,sessionId:'session-routing'});
+    assert.equal(withSession.success,true,withSession.error);
+    await writeFile(join(root,'a.txt'),'one\nsecond\n');
+    const withoutSession=await service.commit({cwd:root});
+    assert.equal(withoutSession.success,true,withoutSession.error);
+    assert.equal(seen.length,2);
+    assert.equal(seen[0].sessionId,'session-routing');
+    assert.equal(Object.hasOwn(seen[1],'sessionId'),false,'no Session means no routing metadata');
+  }finally{service.close();}
+}));
+
 test('settings inheritance, model selection, and deterministic reasoning',async()=>{
   assert.equal(reasoningSelection({reasoning:{efforts:[{id:'off'},{id:'low'},{id:'high'}]}}),'off');
   assert.equal(reasoningSelection({reasoning:{efforts:[{id:'low'},{id:'high'}]}}),'low');
