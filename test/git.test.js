@@ -13,6 +13,7 @@ async function fixture(fn) {
   const root = await mkdtemp(join(tmpdir(), 'dgc-test-'));
   try {
     await git(root, ['init', '-b', 'main']);
+    await git(root, ['config', 'core.hooksPath', join(root, '.git', 'hooks')]);
     await git(root, ['config', 'user.name', 'Test']);
     await git(root, ['config', 'user.email', 'test@example.com']);
     await writeFile(join(root,'a.txt'),'one\n');

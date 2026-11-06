@@ -144,3 +144,13 @@ test('a profile can opt out of model notices without losing the Host service', (
   assert.deepEqual(listeners, []);
   assert.equal(services[0].service.notifier, null);
 });
+
+test('production LLM stream carries plugin-owned request purpose', async () => {
+  const { GitCommitService } = await import('../lib/core/service.js');
+  let seen;
+  await GitCommitService.prototype.ask.call({ ctx: { llm: { async *stream(options) { seen = options; } } } },
+    { system: 'system', prompt: 'diff', maxTokens: 20, purpose: 'generate', sessionId: 'session' },
+    { provider: 'fixture', model: 'fixture' }, new AbortController().signal);
+  assert.equal(seen.purpose, 'git-commit.generate');
+  assert.equal(seen.sessionId, 'session');
+});

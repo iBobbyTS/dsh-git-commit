@@ -16,6 +16,7 @@ async function fixture(fn, target = 'trunk') {
   await mkdir(root);
   try {
     await git(root, ['init', '-b', target]);
+    await git(root, ['config', 'core.hooksPath', join(root, '.git', 'hooks')]);
     await git(root, ['config', 'user.name', 'Test']);
     await git(root, ['config', 'user.email', 'test@example.com']);
     await git(root, ['config', 'commit.gpgsign', 'false']);
