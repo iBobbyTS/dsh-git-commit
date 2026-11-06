@@ -15,7 +15,7 @@
 
 The plugin does not fetch, amend, force-push, reset refs, or stage ignored files. Commit, explicit Push and explicit Merge-and-delete share a per-repository exclusion lock: duplicate requests for the same operation share its result, while a different in-flight operation is rejected rather than queued.
 
-`lib/core/actions.js` owns the follow-up Git operations, exposed by both the `gitCommit` Host service and the existing authenticated RPC allowlist. Push honors normal Git push configuration for an upstream branch; without an upstream it pushes `HEAD:refs/heads/<branch>` to origin and sets upstream. Merge-and-delete resolves `origin/HEAD` without guessing, requires an attached non-default/non-main branch, a clean index/worktree and no unfinished Git operation, then switches to the existing local default, merges the captured source tip, checks that the source has not moved and deletes it using `-d`. Failure results include the stage and completed `merged`/`deleted` flags. Conflicts are preserved for manual resolution; no automatic reset, forced delete, remote deletion or push occurs.
+`src/core/actions.ts` owns the follow-up Git operations, exposed by both the `gitCommit` Host service and the existing authenticated RPC allowlist. Push honors normal Git push configuration for an upstream branch; without an upstream it pushes `HEAD:refs/heads/<branch>` to origin and sets upstream. Merge-and-delete resolves `origin/HEAD` without guessing, requires an attached non-default/non-main branch, a clean index/worktree and no unfinished Git operation, then switches to the existing local default, merges the captured source tip, checks that the source has not moved and deletes it using `-d`. Failure results include the stage and completed `merged`/`deleted` flags. Conflicts are preserved for manual resolution; no automatic reset, forced delete, remote deletion or push occurs.
 
 ## Model-visible commit notice
 
@@ -50,8 +50,8 @@ Settings are atomically written to `$DSH_HOME/dsh-git-commit.json`, permissions 
 
 ## Validation
 
-- `npm run check`: syntax checks and Node integration tests using real temporary Git repositories plus a Client browser-loader hook harness.
-- `npm pack --dry-run --ignore-scripts`: inspect the publishable artifact.
+- `pnpm check`: separate Host/Client types, candidate builds, artifact/install checks and Node integration tests using real temporary Git repositories plus a Client browser-loader hook harness.
+- `npm pack --dry-run`: inspect the publishable artifact.
 - Real Desktop rendering, actual LLM provider calls, and registry package installation must still be checked in an installed DSH runtime; passing component tests alone cannot establish those behaviors.
 
 ## Completion notice

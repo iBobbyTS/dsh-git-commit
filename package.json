@@ -40,19 +40,23 @@
     "README.md",
     "LICENSE",
     "THIRD_PARTY.md",
-    "docs/*.md"
+    "docs/*.md",
+    "src"
   ],
   "scripts": {
-    "test": "node --test test/*.test.js",
-    "check": "node --check lib/index.js && node --check lib/client.js && node --check lib/core/notice.js && node --test test/*.test.js",
-    "prepublishOnly": "npm run check"
+    "test": "node scripts/check.mjs test",
+    "check": "node scripts/check.mjs all",
+    "typecheck": "tsc -p tsconfig.host.json && tsc -p tsconfig.client.json",
+    "build:runtime": "node scripts/build-runtime.mjs",
+    "check:dist": "node scripts/check.mjs dist"
   },
   "dependencies": {
     "@visulima/redact": "5.0.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-llm": ">=0.1.1-rc.2"
+    "@deepseek-ai/dsh-llm": ">=0.1.1-rc.2",
+    "react": "^18.3.1"
   },
   "engines": {
     "node": ">=22.22.1"
@@ -77,5 +81,19 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "tsdown": "0.22.14",
+    "@types/node": "22.20.5",
+    "@types/react": "18.3.31",
+    "react": "18.3.1",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-agent-default-model": "0.2.2-rc.1"
   }
 }

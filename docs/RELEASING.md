@@ -13,14 +13,14 @@ Trusted Publishing is configured on an **existing** npm package. Version **0.2.0
 3. Use Node **24** and npm CLI **11.5.1+**; then run:
 
    ```sh
-   npm install
-   npm run check
-   npm pack --dry-run --ignore-scripts
+   pnpm install --frozen-lockfile
+   pnpm check
+   npm pack --dry-run
    npm login
    npm publish --access public
    ```
 
-   `prepublishOnly` reruns `npm run check` before the real publish. npm may require browser login and 2FA. **Only you** should perform the first publication; this workflow does not attempt to use your credentials.
+   `pnpm check` must pass before the real publish. npm may require browser login and 2FA. **Only you** should perform the first publication; this workflow does not attempt to use your credentials.
 4. Confirm `npm view @ibobbyts/dsh-git-commit version` returns the version published (for the initial fixed release, `0.2.1`). If 0.2.0 already exists, npm will reject reusing that version; publish 0.2.1 manually only if Trusted Publishing has not been set up. If OIDC already works, use the tag workflow instead; never publish the same version by both methods.
 5. Go to **npmjs.com → @ibobbyts/dsh-git-commit → Settings → Trusted publishing → GitHub Actions**. Configure exactly:
 
@@ -37,7 +37,7 @@ Trusted Publishing is configured on an **existing** npm package. Version **0.2.0
 
 ## Subsequent releases: automatic publish on tags
 
-1. Bump `package.json`'s `version` to the next unused release (e.g., `0.2.2` after the fixed `0.2.1`), update code and docs, run `npm run check`, and merge into `main`.
+1. Bump `package.json`'s `version` to the next unused release (e.g., `0.2.2` after the fixed `0.2.1`), update code and docs, run `pnpm check`, and merge into `main`.
 2. Push a version tag matching `package.json` exactly:
 
    ```sh
@@ -53,6 +53,6 @@ Trusted Publishing is configured on an **existing** npm package. Version **0.2.0
 
 ## CI prerequisites and limits
 
-The repository commits `package-lock.json`; the workflows use `npm ci --no-audit --no-fund`. Update the lockfile together with dependency changes. The publishing workflow and actual npm Trusted Publisher configuration must agree before a release tag is pushed.
+The repository commits `pnpm-lock.yaml`; workflows use the pinned pnpm with `pnpm install --frozen-lockfile`. Update the lockfile together with dependency changes. The publishing workflow and actual npm Trusted Publisher configuration must agree before a release tag is pushed.
 
 The tag workflow uses GitHub-hosted runners, Node 24, npm >=11.5.1, `id-token: write`, `contents: read`, and caching disabled. GitHub runners and npm Trusted Publishing must see an exact match between the package's `repository` field, npm Trusted Publisher fields, and workflow identity. Provenance support depends on npm and public repository settings. See https://docs.npmjs.com/trusted-publishers/ .

@@ -2,3 +2,7 @@ node_modules/
 coverage/
 .DS_Store
 *.log
+
+node_modules/
+.build/
+*.tgz
