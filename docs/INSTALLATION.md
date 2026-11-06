@@ -2,7 +2,7 @@
 
 ## npm installation (recommended)
 
-From DSH Desktop's installed `dsh` command (Desktop menu **Manage dsh Command…**), or another compatible DSH CLI:
+For Desktop, launch the app once to create its profile, then fully quit it. Use Desktop's installed `dsh` command (Desktop menu **Manage dsh Command…**). For a separate web profile, use its compatible DSH CLI:
 
 ```sh
 # Quit Desktop completely before CLI changes.

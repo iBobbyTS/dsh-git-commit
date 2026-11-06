@@ -39,7 +39,8 @@
     "icon.svg",
     "README.md",
     "LICENSE",
-    "THIRD_PARTY.md"
+    "THIRD_PARTY.md",
+    "docs/*.md"
   ],
   "scripts": {
     "test": "node --test test/*.test.js",

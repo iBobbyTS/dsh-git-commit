@@ -53,6 +53,6 @@ Trusted Publishing is configured on an **existing** npm package. Version **0.2.0
 
 ## CI prerequisites and limits
 
-The repo intentionally has **no committed npm lockfile** yet because this environment cannot download the registry dependency graph. The workflows use `npm install` with exact direct secret-redaction dependency version and run all tests; after creating a lockfile in an online checkout, commit it and switch install steps to `npm ci` for fully reproducible builds. No publish step or tag is executed as part of initial configuration.
+The repository commits `package-lock.json`; the workflows use `npm ci --no-audit --no-fund`. Update the lockfile together with dependency changes. The publishing workflow and actual npm Trusted Publisher configuration must agree before a release tag is pushed.
 
 The tag workflow uses GitHub-hosted runners, Node 24, npm >=11.5.1, `id-token: write`, `contents: read`, and caching disabled. GitHub runners and npm Trusted Publishing must see an exact match between the package's `repository` field, npm Trusted Publisher fields, and workflow identity. Provenance support depends on npm and public repository settings. See https://docs.npmjs.com/trusted-publishers/ .

@@ -13,7 +13,7 @@ Repository models are persisted in each Git root's `repositories[root].model`. A
 
 ## Position and layout
 
-The expanded panel grows to fit the branch, added/deleted line counts, and its two 36 × 36 px icon buttons, up to **216px** wide. Its compact state is 44 × 44 px. The first collapse fixes the current top-right corner so expanding does not change the anchored corner. Both the main drag handle and compact Git icon are draggable.
+The expanded panel grows to fit the branch, added/deleted line counts, action buttons and result notices. Commit and Settings use 36 × 36 px buttons; Push and the wider Merge-and-delete action appear when applicable. Its compact state is 44 × 44 px. The first collapse fixes the current top-right corner so expanding does not change the anchored corner. Both the main drag handle and compact Git icon are draggable.
 
 All four sides respect a 6px visible inset. The plugin measures the actual panel dimensions and the visible intersection between the containing DSH overlay and the browser window. On window resizing, container resizing, and panel size changes (including the confirmation panel), any out-of-bounds position is moved to the nearest valid location.
 
@@ -23,7 +23,8 @@ The initial position is `right: 24px; bottom: 98px`. Each completed drag and aut
 
 - Row 1: branch with a tooltip containing its full name; fold button at the right.
 - Row 2: `+added` and `−deleted` relative to HEAD, plus trackable untracked text files.
-- Row 3: left-aligned icon buttons, Commit and Settings.
+- Row 3: left-aligned Commit and Settings, plus Push after a successful commit and Merge-and-delete for eligible non-default branches.
+- Push and Merge-and-delete each have their own result notice and ten-second countdown. Hover pauses every visible countdown at its own remaining duration; a result for one operation does not reset another. The Push action remains available after a successful merge.
 - On success, for **10 seconds**: first line `Committed <hash> · +<additions> −<deletions>` (monospace), second line **only** the commit subject (UI font), optional third monospace metrics line, and a configurable countdown bar.
 - Optional metrics: `↓ <input> · ↑ <output> | <TTFT>s · <decode speed>t/s`. Input includes uncached, cache-read and cache-write tokens; unknown values show `—`.
 
