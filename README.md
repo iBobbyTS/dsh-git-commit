@@ -2,6 +2,10 @@
 
 A draggable **Git status + AI commit** panel for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It shows the current Session's repository, generates commit messages using a configured DSH model, and offers explicit Push and Merge-and-delete actions.
 
+## Compatibility
+
+Verified: DSH 0.2.2-rc.1 (source review and automated checks); Desktop testing has not been completed.
+
 ## Install
 
 For Desktop CLI installation, launch the app once to create its profile, fully quit it, and use the app-provided DSH CLI (Desktop menu **Manage dsh Command…**). Install into the profile you use:
