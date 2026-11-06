@@ -521,6 +521,117 @@ test('snapshot budget and capture failures never silently discard Diff or trigge
   assert.equal(calls,0);
 }));
 
+async function longLineSnapshotFixture(fn) {
+  return fixture(async root => {
+    await mkdir(join(root, 'lib'), { recursive: true });
+    const payload = JSON.stringify({
+      version: 3,
+      file: 'client.js',
+      sourcesContent: ['x'.repeat(200_000)],
+    });
+    await writeFile(join(root, 'lib', 'client.js.map'), payload + '\n');
+    await writeFile(join(root, 'src-client.ts'), 'export const marker = 1\n');
+    await git(root, ['add', '-A']);
+    const snapshot = await preparedSnapshot(root, 'staged');
+    return fn(root, snapshot, payload);
+  });
+}
+
+test('one generated line is classified by patch characters and clipped in both prompts', async () => longLineSnapshotFixture(async (_root, snapshot, payload) => {
+  const map = splitFileDiffs(snapshot).find(file => file.path === 'lib/client.js.map');
+  assert.ok(map);
+  assert.equal(map.changedLines, 1);
+  assert.ok(map.patchChars > 60_000);
+  assert.ok(map.maxLineChars > 100_000);
+  const calls = [];
+  const result = await generateMessage(snapshot, tinySettings, async call => {
+    calls.push(call);
+    return call.purpose === 'classify'
+      ? JSON.stringify({ decisions: [{ id: map.id, readFullDiff: false }] })
+      : 'chore(build): regenerate client source map';
+  }, { redact: text => text, contextWindow: 1_000_000 });
+  assert.equal(result, 'chore(build): regenerate client source map');
+  assert.equal(calls.length, 2, 'cost-large file still gets one classification call');
+  assert.equal(calls[0].purpose, 'classify');
+  assert.equal(calls[1].purpose, 'generate');
+  assert.ok(calls[0].prompt.length < 60_000, `classifier prompt ${calls[0].prompt.length}`);
+  assert.match(calls[0].prompt, /longest line/);
+  assert.ok(calls[1].prompt.length < 30_000, `generation prompt ${calls[1].prompt.length}`);
+  assert.match(calls[1].prompt, /TRUNCATED GIT PATCH PREVIEW/);
+  assert.match(calls[1].prompt, /line clipped: \d+ chars omitted/);
+  assert.match(calls[1].prompt, /src-client\.ts" \[FULL GIT PATCH\]/);
+  assert.ok(!calls[1].prompt.includes('x'.repeat(1_000)), 'long line content is not sent verbatim');
+  assert.ok(!calls[1].prompt.includes(payload.slice(1_000, 2_000)), 'payload tail is absent');
+}));
+
+test('a full read request above the per-file ceiling is explicitly clipped', async () => longLineSnapshotFixture(async (_root, snapshot) => {
+  const map = splitFileDiffs(snapshot).find(file => file.path === 'lib/client.js.map');
+  const calls = [];
+  await generateMessage(snapshot, tinySettings, async call => {
+    calls.push(call);
+    return call.purpose === 'classify'
+      ? JSON.stringify({ decisions: [{ id: map.id, readFullDiff: true }] })
+      : 'chore: regenerate source map';
+  }, { redact: text => text, contextWindow: 1_000_000 });
+  assert.equal(calls.length, 2);
+  const generated = calls[1].prompt;
+  assert.match(generated, /FULL GIT PATCH CLIPPED/);
+  assert.ok(generated.length < 140_000, `prompt ${generated.length}`);
+  assert.ok(!generated.includes('x'.repeat(5_000)), 'clipped full patch is bounded');
+}));
+
+test('preview clipping bounds a single long physical line', () => {
+  const preview = previewFileDiff({
+    lines: ['diff --git a/map b/map', '@@ -1 +1 @@', '+' + 'z'.repeat(10_000)],
+  });
+  assert.equal(preview.split('\n').filter(Boolean).length, 3);
+  assert.match(preview, /line clipped: 9601 chars omitted/);
+  assert.ok(preview.length < 1_000, `preview ${preview.length}`);
+});
+
+test('shared patch budget bounds many files and marks budget-only previews', async () => fixture(async root => {
+  for (const name of ['one', 'two', 'three']) {
+    await writeFile(join(root, `${name}.txt`),
+      Array.from({ length: 300 }, (_, i) => `${name}-${i} ${'q'.repeat(100)}`).join('\n') + '\n');
+  }
+  await git(root, ['add', '-A']);
+  const snapshot = await preparedSnapshot(root, 'staged');
+  const files = splitFileDiffs(snapshot);
+  assert.equal(files.length, 3);
+  assert.ok(files.every(file => file.patchChars < 60_000), 'no file crosses the individual cost gate');
+  const calls = [];
+  const result = await generateMessage(snapshot, tinySettings, async call => {
+    calls.push(call);
+    return 'chore: update fixtures';
+  }, { redact: text => text, contextWindow: 16_000 });
+  assert.equal(calls.length, 1, 'no classification without an individually large file');
+  assert.equal(result, 'chore: update fixtures');
+  assert.ok(calls[0].prompt.length < 32_000, `prompt ${calls[0].prompt.length}`);
+  assert.match(calls[0].prompt, /BOUNDED GIT PATCH PREVIEW/);
+  assert.match(calls[0].prompt, /full patch did not fit the shared prompt budget/);
+}));
+
+test('classifier sampling stays bounded across several character-large files', async () => fixture(async root => {
+  for (let index = 0; index < 6; index++) {
+    await writeFile(join(root, `large-${index}.txt`),
+      Array.from({ length: 1800 }, (_, line) => `large-${index}-${line} ${'r'.repeat(60)}`).join('\n') + '\n');
+  }
+  await git(root, ['add', '-A']);
+  const snapshot = await preparedSnapshot(root, 'staged');
+  const files = splitFileDiffs(snapshot);
+  assert.ok(files.every(file => file.changedLines <= 2000 && file.patchChars > 60_000));
+  const calls = [];
+  await generateMessage(snapshot, tinySettings, async call => {
+    calls.push(call);
+    return call.purpose === 'classify'
+      ? JSON.stringify({ decisions: files.map(file => ({ id: file.id, readFullDiff: false })) })
+      : 'chore: add large fixtures';
+  }, { redact: text => text, contextWindow: 1_000_000 });
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0].prompt.length < 60_000, `classifier prompt ${calls[0].prompt.length}`);
+  assert.match(calls[0].prompt, /classifier sample truncated/);
+}));
+
 test('production service propagates distinct classification/generation efforts and commits at most twice',async()=>largeSnapshotFixture(async(root,_snapshot)=>{
   const calls=[];
   const llm={listProviders:()=>[{id:'mock',name:'Mock'}],listModels:async()=>[{id:'model',name:'Model'}],

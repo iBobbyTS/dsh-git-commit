@@ -31,11 +31,13 @@ export declare function splitFileDiffs(snapshot: GitSnapshot): {
     path: string;
     diff: string;
     lines: string[];
+    patchChars: number;
+    maxLineChars: number;
     changedLines: number;
     additions: number;
     deletions: number;
 }[];
-/** Only the first 200 physical Git patch lines are included for skipped large files. */
+/** A bounded preview: first `limit` physical lines, with long lines clipped. */
 export declare function previewFileDiff(file: FileDiff, limit?: number): string;
 /** Untrusted model decisions never cause a file to be silently omitted.
  * Missing, duplicated, invalid, or unparseable decisions default to full Diff.

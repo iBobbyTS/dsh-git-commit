@@ -30,7 +30,9 @@ A successful commit that carries a Session id also injects one `user/message` in
 
 ## LLM context routing (at most two calls)
 
-The plugin builds a complete file inventory and parses each unified Diff file section. When every file has at most **2,000 changed lines**, it makes one generation call. Otherwise, it makes one classification call with every path/stat and the first 200 lines of each large file's Diff. A strictly parsed model decision determines which large files need full Diff. Non-selected large files still contribute an explicitly marked **truncated 200-line preview** to the final generation input. Missing/invalid decisions fall back to full Diff. Pathological or oversized inputs fail explicitly rather than quietly dropping files.
+The plugin builds a complete file inventory and parses each unified Diff file section. A file is **large** when it exceeds **2,000 changed lines or 60,000 patch characters**; the character gate catches a single generated line such as a source map. When every file is below both thresholds, it makes one generation call. Otherwise, it makes one classification call with every path/stat and a bounded sample of each large file: at most 200 patch lines, each clipped to 400 characters, shared across a 48,000-character sample budget. A strictly parsed model decision determines which large files need full Diff.
+
+Every model-visible patch is bounded. Previews stop at 200 lines, a 400-character line cap and 24,000 characters. Selected full patches are included whole up to 120,000 characters; a larger selected patch is clipped to 120,000 characters with a 2,000-character line cap. The final input reserves at most 60% of the request safety budget for patch text and allocates it cheapest-first, so one generated artifact cannot starve accompanying source files. Any omitted content carries an explicit `[TRUNCATED ...]`, `[BOUNDED ...]`, `[FULL GIT PATCH CLIPPED]` or `[no patch text fit ...]` marker. Missing/invalid decisions fall back to full Diff, still subject to the same ceilings. The plugin fails explicitly when even the inventory, instructions and minimal patch framing cannot fit; it never silently drops files or launches unbounded Map-Reduce requests.
 
 The classifier prefers the lowest **non-Off** reasoning level (Off only when the model offers nothing else); final generation prefers Off, falling back to the lowest supported effort.
 
@@ -38,7 +40,7 @@ Both calls forward the requesting Session id as `GenerateOptions.sessionId`: Ses
 
 Both model inputs are best-effort redacted with `@visulima/redact` credential rules. Redaction is *not* a guarantee against every secret or sensitive source path. The real Git snapshot is never modified by prompt redaction. Review changes and avoid staging credentials before committing.
 
-If the Diff exceeds the provider's safe request budget even after selection, the plugin returns an explicit failure; it never launches unbounded Map-Reduce requests.
+The final prompt is checked against `min(1.5M, contextWindow * 2)` characters as a hard safety ceiling. Character counts are not token counts; the provider remains the authority on exact context fit.
 
 ## Statistics
 
