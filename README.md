@@ -4,7 +4,7 @@ A draggable **Git status + AI commit** panel for [DeepSeek Harness](https://gith
 
 ## Compatibility
 
-Verified: DSH 0.2.2-rc.1 (source review and automated checks); Desktop testing has not been completed.
+Verified: DSH 0.2.2-rc.2 (source review, target SDK checks and Web acceptance with all 14 local plugins). Commit, Push to a local bare remote, and Merge-and-delete completed in a temporary repository. Desktop interaction, online Git accounts and online model/provider accounts have not been tested.
 
 ## Install
 
