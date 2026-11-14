@@ -672,7 +672,16 @@ function apply(ctx: ClientContext) {
   }
   function CommitPill(props: {
     useSessions: <T>(
-      fn: (snapshot: { byId: Record<string, { cwd?: string }> }) => T,
+      fn: (snapshot: {
+        byId: Record<
+          string,
+          {
+            cwd?: string
+            /** Effective working directory; `cwd` alone stays the original project. */
+            projectionValues?: { workingDirectory?: string | null }
+          }
+        >
+      }) => T,
     ) => T
   }) {
     React.useSyncExternalStore(subscribeLocale, localeSnapshot, localeSnapshot)
@@ -681,9 +690,18 @@ function apply(ctx: ClientContext) {
       ctx.sidebarRight.mounted.getSnapshot,
       ctx.sidebarRight.mounted.getSnapshot,
     )
-    const cwd = props.useSessions((s) =>
-      sessionId ? s.byId[sessionId]?.cwd : undefined,
-    )
+    // The live workingDirectory projection carries worktree entries (the chat
+    // "new worktree" flow and the create_worktree tool) while the row's cwd
+    // keeps DSH's immutable original project directory. Prefer the projection,
+    // matching DSH's own working-directory precedence; older rows fall back.
+    const cwd = props.useSessions((s) => {
+      if (!sessionId) return undefined
+      const row = s.byId[sessionId]
+      const projected = row?.projectionValues?.workingDirectory
+      return typeof projected === 'string' && projected.trim()
+        ? projected
+        : row?.cwd
+    })
     const floatingPreference = React.useSyncExternalStore(
       visibility.subscribe,
       visibility.getSnapshot,

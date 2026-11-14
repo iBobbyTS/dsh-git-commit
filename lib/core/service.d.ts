@@ -47,6 +47,13 @@ export declare class GitCommitService {
     }>;
     commitSequence: number;
     constructor(ctx: HostContext, options?: ServiceOptions);
+    /**
+     * Effective working directory of one Session. DSH's workingDirectory service
+     * carries committed changes, including a worktree entered through the chat UI
+     * or the create_worktree tool; the Session header only records the original
+     * project and stays the fallback for hosts without that service.
+     */
+    private sessionCwd;
     resolveCwd(request?: Request): string;
     settingsRoot(request?: Request): Promise<string | null>;
     status(request?: Request): Promise<{

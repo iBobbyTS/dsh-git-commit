@@ -4,6 +4,7 @@
 
 - Host `lib/index.js` registers the Cordis service `gitCommit` and an authenticated exact Connection fetch route at `/api/git-commit`; it does not expose an unauthenticated web server.
 - Client `lib/client.js` is a Web/Desktop browser-loader bundle using DSH's `shell.overlay` and native right-sidebar slots. The on-screen Session is obtained from `sidebarRight.mounted`.
+- The targeted directory is the Session's effective working directory — DSH's live `workingDirectory` projection, which carries worktrees entered from the chat UI or the `create_worktree` tool — falling back to the row's original `cwd` when no projection value exists. The Host resolves `sessionId`-only requests through the same precedence: the `workingDirectory` service, then the Session's original header directory.
 - The Host watches filesystem changes with `fs.watch` and a bounded debounce; the Client checks a cheap change token every 900 ms, refreshing full status on changes and at least every 30 seconds.
 
 ## Git index isolation

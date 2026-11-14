@@ -331,6 +331,30 @@ test('initial empty Session does not crash the global overlay; navigating to a r
   t.unmount(pill);
 });
 
+test('the panel follows a Session that entered a DSH worktree',async()=>{
+  // DSH's live workingDirectory projection carries the entered worktree while
+  // the row cwd keeps the immutable original project directory; status and
+  // change-token requests must target the worktree, never the source checkout.
+  const t=clientHarness();
+  const pill=t.mount('shell.overlay');
+  t.render(pill);await t.settle();t.render(pill);
+  const worktree='/example/repo-one/.agents/worktrees/topic';
+  let seen=t.calls.length;
+  t.sessions.byId.one={id:'one',cwd:'/example/repo-one',projectionValues:{workingDirectory:worktree}};
+  t.render(pill);await t.settle();t.render(pill);
+  const followed=t.calls.slice(seen).filter(c=>c.method==='status'||c.method==='changeToken');
+  assert.ok(followed.length>=2,'status and change token polled after the projection moved');
+  assert.ok(followed.every(c=>c.payload.cwd===worktree),'requests target the worktree checkout');
+  assert.equal(readVirtualDom(t.render(pill),node=>node.props?.className==='dgc-branch').length,1);
+  seen=t.calls.length;
+  t.sessions.byId.one={id:'one',cwd:'/example/repo-one',projectionValues:{workingDirectory:null}};
+  t.render(pill);await t.settle();t.render(pill);
+  const reverted=t.calls.slice(seen).filter(c=>c.method==='status'||c.method==='changeToken');
+  assert.ok(reverted.length>=2,'polling continues after the projection cleared');
+  assert.ok(reverted.every(c=>c.payload.cwd==='/example/repo-one'),'a cleared projection falls back to the original directory');
+  t.unmount(pill);
+});
+
 test('Client manifest, visible Git panel, collapse and reopen use icon-only controls',async()=>{
   const t=clientHarness();
   assert.equal(t.styleTags[0].dataset.dshGitCommit,'true');

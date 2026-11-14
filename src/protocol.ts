@@ -5,7 +5,9 @@ export interface GitCommitRequest {
   /** Working directory inside the repository. Prefer an explicit cwd from another plugin. */
   cwd?: string
   repositoryPath?: string
-  /** Requesting Session id; also forwarded as model routing metadata, so Session-keyed provider routes keep working. */
+  /** Requesting Session id; also forwarded as model routing metadata, so Session-keyed provider routes keep working.
+   * Without cwd/repositoryPath, the Session's effective working directory is resolved (worktree-aware through DSH's
+   * workingDirectory service, else its original project directory). */
   sessionId?: string
   /** Optional caller-supplied message; skips AI generation but preserves scope/snapshot validation. */
   message?: string

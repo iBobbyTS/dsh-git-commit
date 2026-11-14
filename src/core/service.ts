@@ -97,13 +97,29 @@ export class GitCommitService {
     this.commitStates = new Map()
     this.commitSequence = 0
   }
+  /**
+   * Effective working directory of one Session. DSH's workingDirectory service
+   * carries committed changes, including a worktree entered through the chat UI
+   * or the create_worktree tool; the Session header only records the original
+   * project and stays the fallback for hosts without that service.
+   */
+  private sessionCwd(sessionId: string): string | undefined {
+    const session = this.ctx.get('sessions')?.get(sessionId as SessionId)
+    if (!session) return undefined
+    const service = this.ctx.get('workingDirectory') as {
+      get?: (session: object) => unknown
+    } | undefined
+    const effective = service?.get?.(session)
+    if (typeof effective === 'string' && effective.trim()) return effective
+    const header = session.header?.cwd
+    return typeof header === 'string' && header.trim() ? header : undefined
+  }
   resolveCwd(request?: Request) {
     const cwd =
       request?.cwd ??
       request?.repositoryPath ??
       (typeof request?.sessionId === 'string'
-        ? this.ctx.get('sessions')?.get(request.sessionId as SessionId)?.header
-            ?.cwd
+        ? this.sessionCwd(request.sessionId)
         : undefined)
     if (typeof cwd !== 'string' || !cwd.trim())
       throw new Error(
@@ -118,8 +134,7 @@ export class GitCommitService {
       request?.cwd ??
       request?.repositoryPath ??
       (typeof request?.sessionId === 'string'
-        ? this.ctx.get('sessions')?.get(request.sessionId as SessionId)?.header
-            ?.cwd
+        ? this.sessionCwd(request.sessionId)
         : undefined)
     return repoRootOrNull(cwd)
   }

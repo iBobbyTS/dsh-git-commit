@@ -154,3 +154,31 @@ test('production LLM stream carries plugin-owned request purpose', async () => {
   assert.equal(seen.purpose, 'git-commit.generate');
   assert.equal(seen.sessionId, 'session');
 });
+
+test('sessionId fallback resolves the effective working directory, worktree-aware', async () => {
+  const { GitCommitService } = await import('../lib/core/service.js');
+  const session = { header: { cwd: '/example/repo-one' } };
+  // Entering a DSH worktree updates the workingDirectory projection while the
+  // immutable Session header keeps the original project directory.
+  let effective = '/example/repo-one/.agents/worktrees/topic';
+  const sessions = { get: (id) => (id === 'session-one' ? session : undefined) };
+  const ctx = {
+    get: (name) => name === 'sessions' ? sessions
+      : name === 'workingDirectory' ? { get: () => effective } : undefined,
+  };
+  const service = new GitCommitService(ctx, { notifier: null });
+  assert.equal(service.resolveCwd({ sessionId: 'session-one' }), '/example/repo-one/.agents/worktrees/topic');
+  effective = '/example/repo-one';
+  assert.equal(service.resolveCwd({ sessionId: 'session-one' }), '/example/repo-one');
+  // An explicit cwd always wins over every session-derived fallback.
+  assert.equal(service.resolveCwd({ cwd: '/explicit', sessionId: 'session-one' }), '/explicit');
+  assert.throws(() => service.resolveCwd({ sessionId: 'unknown' }), /Missing cwd/);
+  // Hosts without the workingDirectory service keep the original-directory fallback.
+  const legacy = new GitCommitService(
+    { get: (name) => (name === 'sessions' ? sessions : undefined) },
+    { notifier: null });
+  effective = '/moved/elsewhere';
+  assert.equal(legacy.resolveCwd({ sessionId: 'session-one' }), '/example/repo-one');
+  service.close();
+  legacy.close();
+});

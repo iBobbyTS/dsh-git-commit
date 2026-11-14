@@ -24,6 +24,6 @@ export async function run(ctx: import('@deepseek-ai/cordis').Context, cwd: strin
 }
 ```
 
-`cwd` may point anywhere inside a Git worktree. Pass `{message: 'type: subject'}` to commit with a **caller-supplied message** instead of invoking an LLM, while retaining all snapshot and hook checks. Other operations include `ctx.gitCommit.status({cwd})` and `ctx.gitCommit.settings({cwd})`. Importing the types is optional at runtime; the service requires this plugin to be installed and enabled in the same DSH profile.
+`cwd` may point anywhere inside a Git worktree. Pass `{message: 'type: subject'}` to commit with a **caller-supplied message** instead of invoking an LLM, while retaining all snapshot and hook checks. Other operations include `ctx.gitCommit.status({cwd})` and `ctx.gitCommit.settings({cwd})`. With only `{sessionId}`, the service targets that Session's effective working directory (worktree-aware, through DSH's `workingDirectory` service), falling back to its original project directory. Importing the types is optional at runtime; the service requires this plugin to be installed and enabled in the same DSH profile.
 
 [Full API contract](../lib/index.d.ts) · [Settings reference](CONFIGURATION.md)
